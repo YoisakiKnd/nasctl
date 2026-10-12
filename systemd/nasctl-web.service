@@ -1,0 +1,108 @@
+[Unit]
+Description=OneCloud Hub console (read-only unified web interface)
+Documentation=file:/usr/local/share/doc/albumctl/HUB-DESIGN.md
+Documentation=file:/usr/local/share/doc/albumctl/RUNBOOK.md
+After=network-online.target
+Wants=network-online.target
+
+# The storage roots must be mounted before the console starts. Replace these with
+# the actual mount or filesystem units for your array. Without them the console
+# may start while the array is absent, and its file pages would report every root
+# as unavailable - which is honest, but not what you want to see by accident.
+# The unit does not *require* the mount: a console that starts and says "the
+# volume is gone" is more useful during an incident than one that refuses to run.
+After=mnt-data.mount
+
+[Service]
+Type=simple
+User=nasctl
+Group=nasctl
+
+ExecStart=/usr/local/bin/nasctl serve --config /etc/albumctl/config.toml
+
+# ---- resource policy -------------------------------------------------------
+# MemoryMax bounds the whole cgroup, not one process's RSS.
+#
+# 96 MiB is a PROVISIONAL ceiling, not a validated one, and it is deliberately
+# larger than the first draft's 64 MiB. The reason is in docs/HUB-STAGE-B.md §5.2:
+# on x86_64 the console idles at ~13 MiB and reaches ~19 MiB under load, but the
+# ARMv7 binary running under qemu-arm-static reaches ~47.6 MiB and plateaus. That
+# gap is dominated by an anonymous executable mapping that is almost certainly
+# qemu's translation cache - a bare ARM HTTP server under the same emulator does
+# not have it - but this environment cannot prove how much is emulation and how
+# much is real allocation.
+#
+# So the choice is between a ceiling that may be too tight (and would OOM-kill a
+# console that is merely doing its job, which is a visible but annoying failure)
+# and one that is looser than necessary (and still bounds the process far below
+# the machine's 981 MiB). The looser one is the right error here.
+#
+# RE-MEASURE ON THE TARGET and then set this to the measured peak plus margin.
+MemoryAccounting=yes
+MemoryHigh=72M
+MemoryMax=96M
+
+# No CPU ceiling. An idle console should answer a request promptly; the console
+# does no background work at all, so there is nothing to throttle.
+CPUWeight=50
+Nice=5
+
+# ---- filesystem policy -----------------------------------------------------
+# The console writes only to its own state directory. ProtectSystem=strict makes
+# the rest of the filesystem read-only, and ReadWritePaths re-opens exactly that
+# one path.
+#
+# Note what is *not* listed: the media tree. The storage roots are opened
+# read-only through os.Root, and this unit means the kernel enforces the same
+# thing even if the code were wrong. File writes are not implemented in this
+# build; when they are, this unit must be revisited deliberately rather than
+# having a path added casually.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/albumctl
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+# No SetUID/SetGID, no ptrace of other processes, and no ability to gain
+# privileges. The console is not root and has no reason to be.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+# ---- exit policy -----------------------------------------------------------
+# Do NOT add Restart=always or Restart=on-failure with a short delay. A console
+# that restarts itself in a loop while the machine is short of memory is exactly
+# the failure this project exists to avoid, and the console's own state
+# reconciliation runs at startup - a restart loop would rewrite job history
+# repeatedly.
+#
+# A clean exit is honoured. A crash is visible in `systemctl status` and in the
+# journal, and a human decides what to do.
+Restart=no
+TimeoutStopSec=15
+KillSignal=SIGTERM
+# KillMode=mixed sends SIGTERM to the main process only, then SIGKILL to the
+# whole cgroup if the grace period expires. The console starts no children, so
+# there is nothing else to signal, but the setting is the safe default.
+KillMode=mixed
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nasctl
+
+# ---- hardening notes -------------------------------------------------------
+# The console has no per-user authentication. Its access control is the bind
+# address, which is checked at startup: a public address is refused unless
+# server.allow_non_private_bind is set. Bind it to the Tailscale address or to
+# loopback behind an SSH tunnel.
+
+[Install]
+WantedBy=multi-user.target

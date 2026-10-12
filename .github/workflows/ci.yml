@@ -1,0 +1,337 @@
+# Continuous integration.
+#
+# What this workflow is for, and what it deliberately is not:
+#
+#   - It builds, vets, formats-checks and tests on linux/amd64, runs the race
+#     detector, cross-compiles the ARMv7 artefacts and proves the build is
+#     reproducible, and renders the frontend in a real DOM.
+#   - It does NOT test the target machine. No runner here is a onecloud, so
+#     nothing in this workflow is evidence about ARMv7 runtime behaviour, memory
+#     use on the target, or cgroup enforcement there. Those remain unverified
+#     until somebody measures them on the machine, and docs/HUB-STAGE-B.md §7
+#     lists them.
+#
+# Every step below was reproduced by hand before being committed, so a failure
+# here means the code changed, not that the workflow was never known to pass.
+
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  # Manual runs, for when a branch needs checking without pushing.
+  workflow_dispatch:
+
+# Read-only by default. A build job has no business writing to the repository.
+permissions:
+  contents: read
+
+# A newer push to the same branch makes an in-flight run obsolete. The ARMv7 job
+# is the slow one, so cancelling it saves real time.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The toolchain the module declares. Pinned so a runner image change cannot
+  # silently move the build to a different Go version: the reproducibility check
+  # depends on the compiler, and a floating version would make it fail for a
+  # reason that has nothing to do with the code.
+  GO_VERSION: "1.27.1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # The baseline: does it build, is it formatted, does it pass its tests.
+  # ---------------------------------------------------------------------------
+  test:
+    name: build, vet, test (amd64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # The module cache is keyed on go.sum, so a dependency change
+          # re-populates it rather than reusing a stale cache.
+          cache: true
+
+      - name: Verify the module graph is tidy
+        # A go.mod that does not match the imports is a build that works on one
+        # machine and fails on the next. This catches it at the source.
+        run: |
+          go mod verify
+          go mod tidy
+          if ! git diff --quiet -- go.mod go.sum; then
+            echo "::error::go.mod or go.sum is not tidy; run 'go mod tidy' and commit the result"
+            git diff -- go.mod go.sum
+            exit 1
+          fi
+
+      - name: Build every package
+        run: go build ./...
+
+      - name: Vet
+        # go vet catches the class of mistake a compiler accepts: a Printf verb
+        # that does not match its argument, a lock copied by value, a struct tag
+        # that no longer parses. Several real bugs in this project's history were
+        # caught here first.
+        run: go vet ./...
+
+      - name: Check formatting
+        run: |
+          unformatted="$(gofmt -l cmd internal)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Test
+        # -count=1 defeats the test cache, so a passing run means the tests ran.
+        run: go test -count=1 ./...
+
+  # ---------------------------------------------------------------------------
+  # The race detector. Separate job because -race needs cgo and a C toolchain,
+  # and because it is slower: keeping it out of the baseline job means a race
+  # failure is clearly labelled rather than lost in a long log.
+  #
+  # This matters more than usual here. The console is a concurrent HTTP server
+  # with a single-connection database, an in-memory mutex table and a supervisor
+  # goroutine; a data race in that shape produces a wrong answer occasionally,
+  # which is the worst kind of failure to debug from a bug report.
+  # ---------------------------------------------------------------------------
+  race:
+    name: race detector (amd64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Test with the race detector
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race -count=1 ./...
+
+  # ---------------------------------------------------------------------------
+  # The ARMv7 artefacts, and the two properties the deliverable promises about
+  # them: that they are statically linked, and that the build is reproducible.
+  #
+  # Reproducibility is checked by building twice with the same SOURCE_DATE_EPOCH
+  # and comparing hashes. If the two differ, something in the build depends on
+  # the environment, and the published checksum would not mean what it claims.
+  # ---------------------------------------------------------------------------
+  armv7:
+    name: ARMv7 artefacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build (first pass)
+        run: SOURCE_DATE_EPOCH=1760000000 ./scripts/build-armv7.sh
+
+      - name: Record the first hashes
+        run: cp dist/SHA256SUMS /tmp/SHA256SUMS.first
+
+      - name: Build (second pass, same epoch)
+        run: SOURCE_DATE_EPOCH=1760000000 ./scripts/build-armv7.sh
+
+      - name: Assert the build is reproducible
+        run: |
+          if ! diff -u /tmp/SHA256SUMS.first dist/SHA256SUMS; then
+            echo "::error::two builds from the same source produced different bytes; the"
+            echo "::error::published checksum would not identify the artefact"
+            exit 1
+          fi
+          echo "reproducible: both builds produced identical hashes"
+
+      - name: Verify the checksums
+        run: sha256sum -c dist/SHA256SUMS
+
+      - name: Assert the binaries are static and are ARM
+        run: |
+          fail=0
+          for bin in dist/albumctl-linux-armv7 dist/nasctl-linux-armv7; do
+            echo "--- $bin"
+            # ELF 32-bit ARM EABI5.
+            if ! file "$bin" | grep -q "ELF 32-bit LSB.*ARM"; then
+              echo "::error::$bin is not a 32-bit ARM ELF"
+              file "$bin"
+              fail=1
+            fi
+            # No shared-library dependencies. This is what lets the binary run on
+            # the target with nothing installed.
+            if readelf -d "$bin" | grep -q NEEDED; then
+              echo "::error::$bin has shared-library dependencies:"
+              readelf -d "$bin" | grep NEEDED
+              fail=1
+            fi
+            # No interpreter, i.e. not dynamically loaded.
+            if readelf -l "$bin" | grep -q "interpreter"; then
+              echo "::error::$bin has an ELF interpreter, so it is not static"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - name: Smoke test under emulation
+        # qemu is not the target, and this is a smoke test rather than a
+        # measurement: it proves the binaries start, parse a real configuration
+        # and index a tree, on a CPU that is not the one they were compiled for.
+        # Nothing here is evidence about memory use or speed on the onecloud.
+        #
+        # The assertions are on the output rather than on the exit status alone:
+        # a scan that indexed nothing also exits 0, and a smoke test that passes
+        # when nothing happened is worse than no smoke test.
+        run: |
+          set -eu
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-user-static >/dev/null
+
+          echo "--- version"
+          qemu-arm-static dist/nasctl-linux-armv7 version
+          qemu-arm-static dist/albumctl-linux-armv7 version
+
+          echo "--- build the fixture and a configuration for it"
+          go run ./internal/synth/cmdgen /tmp/lib
+          mkdir -p /tmp/armstate
+          cat > /tmp/arm.toml <<'EOF'
+          [server]
+          bind = "127.0.0.1:18091"
+          [paths]
+          state_dir = "/tmp/armstate"
+          [guard]
+          require_cgroup_isolation = false
+          [[collections]]
+          code = "lib"
+          name = "Library"
+          root = "/tmp/lib"
+          enabled = true
+          allow_shared_volume = true
+          EOF
+
+          echo "--- scan the fixture with the ARM binary"
+          out="$(qemu-arm-static dist/albumctl-linux-armv7 scan \
+                   --config /tmp/arm.toml --collection lib --limit 100)"
+          echo "$out"
+
+          # The fixture has 39 files, of which some are deliberately unsupported
+          # or hidden. What matters is that a real walk happened and files were
+          # indexed; the exact count is the fixture's business, not the CI's.
+          if ! echo "$out" | grep -qE "entries:[[:space:]]+[1-9][0-9]* indexed"; then
+            echo "::error::the ARM binary indexed no files; the smoke test would pass on a no-op"
+            exit 1
+          fi
+          if echo "$out" | grep -qE "failed:[[:space:]]+[1-9]"; then
+            echo "::error::the ARM scan reported failures"
+            exit 1
+          fi
+          echo "the ARM binary indexed files and reported no failures"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: armv7-artefacts
+          path: |
+            dist/albumctl-linux-armv7
+            dist/nasctl-linux-armv7
+            dist/SHA256SUMS
+            dist/README.txt
+            dist/deps.txt
+          # The build record is small; the binaries are ~12 MB each and are kept
+          # for a week so a reviewer can download the exact artefact CI verified.
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # The frontend, in a real DOM.
+  #
+  # The page has no build step, so nothing compiles it and a mistake in it is not
+  # caught by `go build`. This job starts the console against a synthetic library
+  # and renders the real page with jsdom, checking that every view populates.
+  #
+  # It cannot check layout: jsdom has no layout engine. Appearance still needs a
+  # real browser, and the harness says so in its own output.
+  # ---------------------------------------------------------------------------
+  frontend:
+    name: frontend in a DOM
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install the harness dependency
+        working-directory: scripts/uitest
+        run: npm install --no-audit --no-fund
+
+      - name: Build the console
+        run: go build -o /tmp/nasctl ./cmd/nasctl
+
+      - name: Build a fixture library and a configuration for it
+        run: |
+          go run ./internal/synth/cmdgen /tmp/lib
+          mkdir -p /tmp/hubstate
+          cat > /tmp/hub.toml <<'EOF'
+          [server]
+          bind = "127.0.0.1:18090"
+
+          [paths]
+          state_dir = "/tmp/hubstate"
+
+          [hub]
+          bind = "127.0.0.1:18090"
+
+          [[hub.storage]]
+          id = "lib"
+          label = "Library"
+          path = "/tmp/lib"
+
+          [[collections]]
+          code = "lib"
+          name = "Library"
+          root = "/tmp/lib"
+          EOF
+
+      - name: Start the console
+        run: |
+          /tmp/nasctl --config /tmp/hub.toml serve > /tmp/console.log 2>&1 &
+          # Wait for readiness rather than sleeping a fixed time: a fixed sleep is
+          # either slower than necessary or occasionally too short.
+          for i in $(seq 1 50); do
+            if curl -sf -o /dev/null http://127.0.0.1:18090/api/v1/overview; then
+              echo "console is up after ${i} attempts"
+              exit 0
+            fi
+            sleep 0.2
+          done
+          echo "::error::the console did not become ready; its log follows"
+          cat /tmp/console.log
+          exit 1
+
+      - name: Render the page
+        working-directory: scripts/uitest
+        run: node render.mjs http://127.0.0.1:18090
+
+      - name: Console log on failure
+        if: failure()
+        run: cat /tmp/console.log

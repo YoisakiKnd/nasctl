@@ -1,0 +1,12 @@
+{
+  "name": "nasctl-uitest",
+  "private": true,
+  "description": "Renders the console's page in a real DOM (jsdom) against a running server. A development-machine harness only; nothing here runs on the NAS.",
+  "type": "module",
+  "scripts": {
+    "render": "node render.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^27.4.0"
+  }
+}

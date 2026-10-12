@@ -1,0 +1,359 @@
+# albumctl example configuration.
+#
+# Copy to /etc/albumctl/config.toml on the target machine and edit the paths.
+#
+# Every POLICY value below - every threshold, ceiling, timeout and format switch
+# - is the built-in default, so an option can simply be deleted to get the
+# default back. Only two things here are local to a machine and cannot be
+# defaults: the paths under [paths], and the [[collections]] entries, which are
+# placeholders for directories that exist on the target box.
+#
+# A misspelled key is refused by name rather than ignored. Most numbers in this
+# file are floors and ceilings, and a silently dropped one would leave you
+# believing a limit is in force when it is not.
+#
+# Check it without changing anything:
+#     albumctl doctor --config /etc/albumctl/config.toml
+#
+# The paths here are placeholders. They are deliberately not the real ones.
+
+[server]
+# Bind address. Keep this on a private interface. The service has no
+# authentication of its own: the address IS the access control.
+#
+#   Tailscale only      the machine's 100.x.y.z tailnet address, e.g. 100.64.0.10
+#   Loopback only       "127.0.0.1:8088" plus an SSH tunnel
+#
+# Do not use 0.0.0.0. If it is set, the service refuses to start unless
+# allow_non_private_bind is also set, which is intended for offline tests.
+bind = "127.0.0.1:8088"
+allow_non_private_bind = false
+
+# A shared token, if the tunnel is not enough for your situation. Empty means no
+# authentication, which is the default and is why the bind address matters.
+token = ""
+
+read_header_timeout = "10s"
+read_timeout = "30s"
+write_timeout = "60s"
+idle_timeout = "60s"
+shutdown_timeout = "10s"
+
+# Concurrency and size limits. These exist so a browser that opens fifty tabs
+# cannot consume the machine.
+max_concurrent_requests = 8
+max_concurrent_streams = 3
+page_default = 60
+page_max = 200
+max_response_bytes = 2097152
+static_cache_seconds = 86400
+thumb_placeholder_cache_seconds = 60
+
+# Include the live resource snapshot in /api/v1/status.
+expose_resource_snapshot = true
+
+[paths]
+# Index, task state, locks and logs. Must be on the system SSD, and must NOT be
+# inside any media tree.
+state_dir = "/var/lib/albumctl"
+
+# Thumbnails. Separate from state so its size can be watched and pruned on its
+# own. Must not be inside any media tree either.
+cache_dir = "/var/cache/albumctl"
+
+# Optional overrides. Empty means "<state_dir>/index.sqlite" and so on.
+index_file = ""
+log_file = ""
+lock_dir = ""
+run_dir = ""
+
+[cache]
+# The cache has a hard ceiling and is pruned by hand only. Nothing expires
+# thumbnails automatically, and no request ever adds to it.
+max_bytes = 2147483648   # 2 GiB
+max_files = 40000
+# Shard depth of the hash directory tree: 3 means 16 MiB leaf directories'
+# worth of fan-out. Raises the number of names per directory.
+shard_depth = 3
+# doctor warns at this fill level. It never deletes anything.
+warn_at_percent = 90
+orphan_grace_seconds = 3600
+
+[guard]
+# These are ABSOLUTE thresholds in kB, not percentages, and they are the initial
+# conservative test values from the design. Re-derive them from measurements on
+# the target machine; do not raise them just to make a large file succeed.
+#
+#   400 MiB  sustained before a media worker may start
+#   250 MiB  no new file may start below this
+#   200 MiB  heavy work stops immediately below this
+start_mem_available_kb = 409600
+warn_mem_available_kb  = 256000
+stop_mem_available_kb  = 204800
+
+sample_interval = "1s"
+
+# How long the budget above must HOLD before a run may begin. BeforeFile gates
+# every file; this gates the start of a run, so that a momentary lull - somebody
+# else's page cache being reclaimed for a second - cannot admit a decoder. The
+# cost is a few seconds of latency per batch; 0 disables it.
+start_hold = "3s"
+
+# cgroup ceilings. The worker ceiling applies to the whole cgroup: the child,
+# anything it forks, and page cache charged to it. It is not a bound on one
+# process's RSS.
+worker_mem_high_mb = 96
+worker_mem_max_mb = 128
+server_mem_high_mb = 48
+server_mem_max_mb = 64
+
+# PSI stop thresholds, on the "some" line's avg10. 0 disables a check.
+psi_memory_some_avg10_stop = 50
+psi_io_some_avg10_stop = 80
+
+# Swap usage stop. Swap in use during a decode means the machine is already
+# thrashing; the run stops rather than adding pressure.
+max_swap_used_kb = 65536
+min_swap_free_kb = 0
+
+# Resource isolation. With require_cgroup_isolation = true, heavy tasks REFUSE
+# to run when limits cannot be applied, instead of running without them. Do not
+# relax this on the target machine.
+use_cgroup = true
+require_cgroup_isolation = true
+cgroup_root = "/sys/fs/cgroup"
+use_psi = true
+
+# Adjuncts only. nice and ionice do not replace a memory limit.
+nice_level = 15
+ionice_class = "idle"
+
+# After a resource-pressure stop, heavy work stays blocked until an explicit
+# `albumctl resume`. This value is the earliest a manual resume is accepted.
+cooldown_after_trip = "30m"
+
+[decode]
+# Pre-screening. A file outside these bounds is skipped, never attempted.
+max_pixels = 12000000
+max_file_bytes = 268435456
+max_decode_mem_mb = 96        # must not exceed guard.worker_mem_max_mb
+max_frames = 1
+
+per_file_timeout = "60s"
+grace_period = "5s"
+
+# Retries are bounded and backed off. Failures never widen a memory budget.
+max_attempts = 3
+retry_backoff = "30m"
+max_error_streak = 5
+
+# One thumbnail size, baked in. Clients cannot ask for a bigger one and the
+# service will not upscale to the original.
+thumb_max_edge = 512
+thumb_quality = 82
+
+max_scan_depth = 64
+probe_max_metadata_bytes = 262144
+worker_log_tail_kb = 8
+
+[time]
+# Off by default: a date guessed from a file name is worse than an honest
+# "no capture time". The file's own mtime is used as a labelled fallback.
+filename_heuristic = false
+
+[formats]
+jpeg = true
+png = true
+gif = true
+webp = true
+
+# Video posters need an external ffmpeg. Off by default; enabling it changes the
+# resource profile of the thumbnail task and needs its own authorization.
+video_poster = false
+ffmpeg_path = "ffmpeg"
+video_poster_timeout = "30s"
+video_poster_seek = "3s"
+
+# Reading duration and container creation time from an MP4/MOV header is cheap
+# and does not decode anything.
+video_probe = true
+
+[backup]
+# albumctl yields to the existing backup. It never stops, signals or reconfigures
+# it, and it does not guess from process names: point this at the operator's own
+# status command, or list systemd units, or leave it empty.
+#
+# Exit code 0 (or any code in busy_exit_codes) means "busy" and the thumbnail
+# task stops at the next file boundary. The default follows the convention set
+# by `systemctl is-active`, where success means it is running.
+check_command = ""
+check_args = []
+busy_exit_codes = [0]
+check_timeout = "5s"
+
+# Consulted with `systemctl is-active --quiet` when no command is set.
+systemd_units = []
+
+# albumctl is the lower-priority of the two, so it is the one that yields.
+skip_thumbs_when_busy = true
+
+# false: an unanswerable backup question is noted and the run continues.
+# true: it blocks the run. Set true once the status command is known to work.
+require_known = false
+
+# ---------------------------------------------------------------------------
+# OneCloud Hub (nasctl)
+# ---------------------------------------------------------------------------
+#
+# The console is a separate process from the album service. It reads this same
+# file, and nothing in this section can widen what [server], [guard] or the
+# collections above allow.
+#
+# The whole section defaults to an empty console: no storage roots and no
+# integrations. Copying this file without editing it gives you a console that
+# can report on the machine and nothing more, which is the only safe thing to
+# get by accident.
+
+[hub]
+
+# Directories the file manager may browse. Each is addressed by its ID in every
+# request and in every API call - never by a path - so a request cannot name a
+# directory that is not listed here.
+#
+#   id            lowercase letters, digits, '-' and '_' only; appears in URLs
+#   path          must be absolute and must not sit inside another root
+#   label         shown in the UI; defaults to the ID
+#   expose_hidden include dot-prefixed entries (off by default: on a NAS those
+#                 are usually another tool's state, and showing them invites
+#                 deleting something a tool needs)
+#
+# Do not list "/" or a whole data volume. List the directories you want browsed.
+# State and cache directories must not be listed: the console refuses to start
+# with a storage root that overlaps its own state.
+#
+# [[hub.storage]]
+# id = "media"
+# label = "Media"
+# path = "/mnt/data/media"
+#
+# [[hub.storage]]
+# id = "downloads"
+# label = "Downloads"
+# path = "/mnt/data/downloads"
+
+# File writes (upload, mkdir, rename, move, copy, trash) are not implemented in
+# this build. `writable = true` is refused by the configuration validator rather
+# than accepted and ignored, so this key cannot promise a capability the binary
+# does not have. It is documented here so that a configuration written for a
+# later version produces a clear message instead of a typo report.
+# writable = false
+
+# AI principals with their own credentials.
+#
+# This is what makes the agent distinction real. Without a credential, an agent
+# would be recognised only by a header it declares about itself, so it could
+# escape every agent restriction - the audit of its reads, the prohibition on
+# starting heavy work, the approval rules - by simply not sending one.
+#
+# With a credential, the token decides the principal: a caller holding an agent
+# token IS that agent, whatever it claims. A caller holding server.token is the
+# operator.
+#
+#   name         lowercase, appears in the audit log and in approval records
+#   token        at least 16 characters, and must differ from server.token and
+#                from every other agent's, or the console cannot tell who is calling
+#   allow_heavy  per-agent: lets THIS agent start bounded heavy work. Off by
+#                default, and off is the right answer on a 981 MiB machine unless
+#                you have decided otherwise.
+#
+# [[hub.agents]]
+# name = "hermes"
+# token = "replace-with-a-long-random-string"
+# allow_heavy = false
+
+[hub.jobs]
+# The console's own job records. Both bounds exist so that a machine that is
+# never reinstalled does not accumulate rows forever.
+max_open_jobs = 32
+max_history = 5000
+audit_retention_days = 90
+
+[hub.suzu]
+# Read-only integration with the existing IWantWatchAnime (suzu) service.
+#
+# The console opens suzu's database read-only and never writes it: suzu is the
+# only writer of its own state, and a second writer is how a library gets
+# corrupted. Writes go through suzu's own API when that is delivered.
+#
+# db_path       suzu's SQLite file, e.g. /opt/suzu/suzu.db
+# api_base      must be loopback; the console talks to a service on this machine
+# library_root  where suzu archives episodes, used to resolve a library row to a
+#               file. Left empty, playback is disabled and the console says so
+#               rather than guessing a path.
+#
+# Leave all three empty to disable the integration entirely.
+# db_path = ""
+# api_base = "http://127.0.0.1:8637"
+# token = ""
+# library_root = ""
+
+# Every collection is a directory that already exists and is mounted read-only
+# for this application's purposes. Nothing here is written to.
+
+[[collections]]
+code = "photos"
+name = "Photos"
+root = "/mnt/data/photos"
+
+# The mountpoint this collection is expected to live under. Every task and
+# `doctor` verify that it really is a mount point and that `root` really resides
+# on it. This is what catches a RAID array that failed to assemble: with the
+# mount gone, `root` becomes an ordinary empty directory on the system disk, and
+# a scan would report the entire library as missing.
+data_mount = "/mnt/data"
+
+enabled = true
+
+# Off. Following a symlink out of the media tree is how a scan ends up indexing
+# something it was never given.
+follow_symlinks = false
+
+# Record the filesystem identity on the first successful check and refuse to run
+# if it ever changes. Empty means "record it on first run"; after the first
+# `doctor`, paste the reported value here. This is the guard against the array
+# being rebuilt or remounted as something else.
+expect_fsid = ""
+
+enabled_kinds = ["image", "video", "other"]
+
+# Patterns skipped during a scan. Matched three ways, and any one is enough:
+#   - the base name, with filepath.Match globs ("*.tmp", "@eaDir") - a bare name
+#     therefore matches at any depth
+#   - the path relative to this collection's root, with the same globs
+#   - a literal relative path, which also excludes its whole subtree
+#
+# There is no "**" wildcard: filepath.Match does not have one. A subtree is
+# excluded by naming its directory, as in the "@eaDir" entry below.
+#
+# Dot-prefixed names are already skipped without being listed here (._IMG.jpg,
+# .DS_Store, .Trash), so they do not need patterns.
+exclude = ["@eaDir", "*.tmp", "Thumbs.db"]
+
+# Leave false. It only relaxes two heuristic checks (media tree on a different
+# filesystem from the state dir, and not on the same filesystem as "/"), for a
+# genuinely single-volume setup or an offline test. The unambiguous
+# data_mount check above is NOT affected and cannot be turned off.
+allow_shared_volume = false
+
+# A second collection, e.g. a different share. Remove if unused.
+[[collections]]
+code = "video"
+name = "Videos"
+root = "/mnt/data/video"
+data_mount = "/mnt/data"
+enabled = false           # disabled until its own sample run is authorized
+follow_symlinks = false
+expect_fsid = ""
+enabled_kinds = ["video"]
+exclude = []
+allow_shared_volume = false

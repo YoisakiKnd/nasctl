@@ -1,0 +1,49 @@
+[Unit]
+Description=albumctl nightly thumbnail window (SHIPS DISABLED)
+Documentation=file:/usr/local/share/doc/albumctl/RUNBOOK.md
+
+# ---------------------------------------------------------------------------
+# THIS TIMER IS NOT ENABLED AND MUST NOT BE ENABLED WITHOUT A SEPARATE,
+# EXPLICIT DECISION.
+#
+# The design says automatic scheduling is a later step that is authorized on its
+# own. Nothing in the deployment instructions enables this file, and installing
+# it does not start it. `systemctl enable --now` would, and that is the operator's
+# deliberate act.
+#
+# Before enabling it, understand what it does and does not know:
+#
+#   - It does NOT know the class schedule, the backup window, or when someone is
+#     using the machine. "Nobody is up at 03:00" is not a fact about this machine
+#     and is not assumed anywhere.
+#   - It does NOT replace the resource thresholds. Even inside the window, every
+#     start still requires MemAvailable to be sustained above the start
+#     threshold, and the run still stops on any stop condition.
+#   - It does NOT touch the existing backup. It is albumctl that yields. Set
+#     backup.check_command or backup.systemd_units so it knows when to yield,
+#     and prefer that interface over guessing from process names.
+#   - It does NOT resume a pressure trip. A trip stays until a human runs
+#     `albumctl resume`, which is exactly what should happen after a resource
+#     stop.
+#
+# A reasonable first use of this timer, if it is ever used, is one small batch a
+# night with Persistent=false, so a missed window is missed rather than run at an
+# unexpected time.
+# ---------------------------------------------------------------------------
+
+[Timer]
+# 03:20 local time, with a random delay so it does not collide with other
+# nightly jobs that also start on the hour.
+OnCalendar=*-*-* 03:20:00
+RandomizedDelaySec=20m
+# Persistent=false on purpose: do not run a catch-up batch after downtime.
+# The batch would start whenever the machine came back, which is precisely when
+# its resources are least predictable.
+Persistent=false
+# Do not fire while the previous batch is still running.
+AccuracySec=1min
+
+[Install]
+# Left disabled: enable with `systemctl enable --now albumctl-thumbs.timer` once
+# a manual bounded run has been accepted.
+WantedBy=timers.target

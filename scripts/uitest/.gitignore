@@ -1,0 +1,11 @@
+# The harness is a development-machine tool. Its dependencies are installed here
+# and are not part of the deliverable: nothing in this directory runs on the
+# target, because the console's frontend is plain JavaScript embedded in the
+# binary, with no build step and no runtime dependency.
+#
+# Both forms are listed on purpose. A trailing-slash pattern matches a directory
+# but NOT a symlink, so "node_modules/" alone would leave a linked node_modules
+# visible to git.
+node_modules
+node_modules/
+package-lock.json

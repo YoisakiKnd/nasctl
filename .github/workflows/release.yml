@@ -1,0 +1,108 @@
+# Release: build the ARMv7 artefacts for a tag and attach them.
+#
+# Triggered by a version tag, not by a push. A release is a deliberate act, and
+# the artefacts a tag points at should be the ones the tag was made from.
+#
+# What this does NOT do: deploy anything, publish to a package registry, or touch
+# any machine. The artefacts are attached to the release so a person can download
+# them and verify the checksums; installing them remains a manual, authorised
+# step (docs/RUNBOOK.md).
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Allows a dry run: build and upload as a workflow artefact without creating a
+  # release, so the pipeline can be checked before a tag is cut.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and upload as a workflow artefact only"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.27.1"
+
+jobs:
+  build:
+    name: ARMv7 artefacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      # Needed only to attach files to a release.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The version comes from the tag, and the build script reads VERSION
+          # and the commit, so the history has to be present.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Test before releasing
+        # A release must not be built from a commit whose tests fail. This is the
+        # same suite as CI; if it is green there, it is green here.
+        run: go test -count=1 ./...
+
+      - name: Build
+        run: SOURCE_DATE_EPOCH=1760000000 ./scripts/build-armv7.sh
+
+      - name: Verify the checksums
+        run: sha256sum -c dist/SHA256SUMS
+
+      - name: Assert the binaries are static 32-bit ARM
+        run: |
+          fail=0
+          for bin in dist/albumctl-linux-armv7 dist/nasctl-linux-armv7; do
+            file "$bin" | grep -q "ELF 32-bit LSB.*ARM" || { echo "::error::$bin is not 32-bit ARM"; fail=1; }
+            readelf -d "$bin" | grep -q NEEDED && { echo "::error::$bin links a shared library"; fail=1; }
+            readelf -l "$bin" | grep -q interpreter && { echo "::error::$bin is not static"; fail=1; }
+          done
+          exit $fail
+
+      - name: Attach to the release
+        if: github.event_name == 'push' && !inputs.dry_run
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/albumctl-linux-armv7
+            dist/nasctl-linux-armv7
+            dist/SHA256SUMS
+            dist/README.txt
+            dist/deps.txt
+          # The build record explains how to verify the download and what the
+          # binaries need at run time, so it belongs with them.
+          body: |
+            ARMv7 (armv7l) static binaries for the OneCloud Hub.
+
+            Verify the download before using it:
+
+                sha256sum -c SHA256SUMS
+
+            `deps.txt` records what the binaries need at run time (nothing beyond
+            the kernel) and `README.txt` records the toolchain and sizes.
+
+            **Not verified on the target machine.** These binaries were built and
+            smoke-tested under emulation only. See `docs/HUB-STAGE-B.md` §7 for
+            the list of what remains unverified, including memory ceilings.
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: armv7-${{ github.ref_name }}
+          path: |
+            dist/albumctl-linux-armv7
+            dist/nasctl-linux-armv7
+            dist/SHA256SUMS
+            dist/README.txt
+            dist/deps.txt
+          retention-days: 30

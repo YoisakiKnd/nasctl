@@ -1,0 +1,35 @@
+# Build output. The ARMv7 artefacts are attached to releases rather than
+# committed: a binary in the history is a binary nobody can diff, and it goes
+# stale the moment the source changes.
+/dist/
+
+# Go workspace and test artefacts.
+*.test
+*.out
+/coverage.txt
+/coverage.html
+
+# The UI harness's dependencies. Nothing in scripts/uitest runs on the NAS: the
+# console's frontend is plain JavaScript embedded in the binary, with no build
+# step and no runtime dependency. Both forms are listed because a trailing-slash
+# pattern matches a directory but not a symlink.
+/scripts/uitest/node_modules
+/scripts/uitest/node_modules/
+/scripts/uitest/package-lock.json
+
+# Editor and OS noise.
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+
+# Local configuration. The shipped example is configs/albumctl.example.toml;
+# a real configuration names real paths and may carry a token, so it must never
+# be committed.
+config.toml
+*.local.toml
+
+# Local state, in case anyone runs the tools from the checkout.
+/state/
+/cache/

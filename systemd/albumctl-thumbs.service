@@ -1,0 +1,91 @@
+[Unit]
+Description=albumctl thumbnail pass (bounded, one file at a time)
+Documentation=file:/usr/local/share/doc/albumctl/RUNBOOK.md
+# One bounded pass over the thumbnail queue, then exit. This unit is NOT a
+# daemon and must never be given Restart=always.
+#
+# It is started by hand, or by albumctl-thumbs.timer, which ships disabled.
+# Nothing here runs on its own until an operator enables it.
+
+After=network-online.target mnt-data.mount
+Requires=mnt-data.mount
+
+[Service]
+Type=oneshot
+User=albumctl
+Group=albumctl
+
+# ---- the batch, and its two hard bounds ------------------------------------
+# --limit and --max-runtime are both required, and both are enforced. Edit the
+# numbers here, not in a shell loop, so the bound is visible in `systemctl cat`.
+#
+# Start with 10 files. Increasing this is a separate, reviewed step: one
+# variable at a time, never a jump to the whole library.
+ExecStart=/usr/local/bin/albumctl thumbs \
+    --config /etc/albumctl/config.toml \
+    --collection photos \
+    --limit 10 \
+    --max-runtime 15m
+
+# Exit codes: 0 did the batch; 3 stopped early and cleanly (paused, backup busy,
+# a resource trip already recorded, lock held); 4 stopped by a resource
+# threshold during the run; 1 failed.
+# A non-zero code is not retried here. The reason is in the journal and in
+# `albumctl status`, and the next step is a decision, not another attempt.
+SuccessExitStatus=0
+
+# ---- resource policy -------------------------------------------------------
+# This is the unit that matters. MemoryMax=128M is a ceiling on the cgroup
+# containing the supervisor AND the decode child AND anything the child forks.
+# It is the backstop that holds even if the application's own guard has a bug.
+MemoryAccounting=yes
+MemoryHigh=96M
+MemoryMax=128M
+
+# Rotation between the two directions is deliberate: this is background work.
+CPUWeight=20
+IOWeight=20
+
+# Delegation is what lets albumctl create its own child cgroup and attribute
+# memory to the decoder (memory.current, memory.events, OOM kill counts) instead
+# of watching one process's RSS and hoping. Without it, guard.require_cgroup_isolation
+# makes the task refuse to run rather than run unaccounted.
+Delegate=yes
+
+# This unit only ever writes to its own state and cache directories.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/albumctl /var/cache/albumctl
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=no
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX
+NoNewPrivileges=yes
+# The worker child is a re-exec of this same binary. It needs no capability
+# beyond what an ordinary user has.
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+# ---- exit policy -----------------------------------------------------------
+Restart=no
+# The application kills its own child cgroup on SIGTERM and exits at the next
+# file boundary. This is the backstop for a supervisor that does not respond.
+TimeoutStopSec=120
+KillSignal=SIGTERM
+KillMode=mixed
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=albumctl-thumbs
+
+Nice=10
+IOSchedulingClass=idle
+
+# No [Install] section on purpose. This is a bounded batch that a human or the
+# timer starts; it is never pulled up by a boot target.
