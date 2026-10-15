@@ -25,11 +25,16 @@ import (
 	"time"
 
 	"github.com/YoisakiKnd/nasctl/internal/domain"
+	"github.com/YoisakiKnd/nasctl/internal/statelease"
 	_ "modernc.org/sqlite"
 )
 
 // SchemaVersion is the on-disk schema this build understands.
 const SchemaVersion = 1
+
+// MaxAuditRows also bounds a burst within a single retention day. The indexed
+// AUTOINCREMENT range avoids counting/scanning the entire audit on each read.
+const MaxAuditRows = 100000
 
 // Errors returned by this package.
 var (
@@ -57,6 +62,7 @@ type Store struct {
 	db     *sql.DB
 	path   string
 	limits Limits
+	lease  *statelease.Lease
 }
 
 // Open opens (creating if needed) the console database.
@@ -76,6 +82,16 @@ func Open(path string, limits Limits) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(abs), 0o750); err != nil {
 		return nil, fmt.Errorf("hubstore: cannot create state directory: %w", err)
 	}
+	lease, err := statelease.Acquire(filepath.Dir(abs), false)
+	if err != nil {
+		return nil, err
+	}
+	keepLease := false
+	defer func() {
+		if !keepLease {
+			_ = lease.Close()
+		}
+	}()
 	if limits.MaxOpenJobs <= 0 {
 		limits = DefaultLimits()
 	}
@@ -103,16 +119,23 @@ func Open(path string, limits Limits) (*Store, error) {
 		return nil, fmt.Errorf("hubstore: cannot open %s: %w", abs, err)
 	}
 
-	s := &Store{db: db, path: abs, limits: limits}
+	s := &Store{db: db, path: abs, limits: limits, lease: lease}
 	if err := s.migrate(ctx); err != nil {
 		db.Close()
 		return nil, err
 	}
+	keepLease = true
 	return s, nil
 }
 
 // Close releases the database.
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	err := s.db.Close()
+	if release := s.lease.Close(); err == nil {
+		err = release
+	}
+	return err
+}
 
 // Path returns the database file path.
 func (s *Store) Path() string { return s.path }
@@ -173,6 +196,8 @@ var schema = []string{
 		note      TEXT NOT NULL DEFAULT ''
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_audit_at ON audit(at DESC, id DESC)`,
+	fmt.Sprintf(`CREATE TRIGGER IF NOT EXISTS nasctl_audit_cap AFTER INSERT ON audit
+	 BEGIN DELETE FROM audit WHERE id <= NEW.id - %d; END`, MaxAuditRows),
 	`CREATE TABLE IF NOT EXISTS modes (
 		mode       TEXT PRIMARY KEY,
 		source     TEXT NOT NULL,
@@ -382,8 +407,9 @@ func unixTime(sec int64) time.Time {
 
 // JobFilter selects jobs for a listing.
 type JobFilter struct {
-	State domain.JobState
-	Op    string
+	State     domain.JobState
+	Op        string
+	Principal string
 	// Open restricts the listing to jobs that still hold a slot.
 	Open bool
 	// Limit and Offset page the result. Limit is required.
@@ -410,6 +436,10 @@ func (s *Store) Jobs(ctx context.Context, f JobFilter) ([]Job, error) {
 	if f.Op != "" {
 		where = append(where, "op = ?")
 		args = append(args, f.Op)
+	}
+	if f.Principal != "" {
+		where = append(where, "principal = ?")
+		args = append(args, f.Principal)
 	}
 	if f.Open {
 		where = append(where, `state IN ('queued','running','waiting','paused','interrupted','unknown')`)
@@ -447,7 +477,17 @@ func (s *Store) CountOpen(ctx context.Context) (int, error) {
 
 // CountByState returns job counts keyed by state.
 func (s *Store) CountByState(ctx context.Context) (map[string]int, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT state, COUNT(*) FROM jobs GROUP BY state`)
+	return s.CountByOwner(ctx, "")
+}
+func (s *Store) CountByOwner(ctx context.Context, owner string) (map[string]int, error) {
+	query := `SELECT state, COUNT(*) FROM jobs`
+	var args []any
+	if owner != "" {
+		query += ` WHERE principal=?`
+		args = append(args, owner)
+	}
+	query += ` GROUP BY state`
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -695,7 +735,7 @@ func (s *Store) PruneHistory(ctx context.Context) (int64, error) {
 // PruneAudit deletes audit rows older than the retention window.
 func (s *Store) PruneAudit(ctx context.Context, now time.Time) (int64, error) {
 	cutoff := now.AddDate(0, 0, -s.limits.AuditDays).Unix()
-	res, err := s.db.ExecContext(ctx, `DELETE FROM audit WHERE at < ?`, cutoff)
+	res, err := s.db.ExecContext(ctx, `DELETE FROM audit WHERE at < ? OR id <= (SELECT COALESCE(MAX(id),0) FROM audit) - ?`, cutoff, MaxAuditRows)
 	if err != nil {
 		return 0, err
 	}

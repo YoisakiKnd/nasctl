@@ -1,8 +1,10 @@
 # nasctl (OneCloud Hub) HTTP API v1
 
-The console's HTTP surface. It is **read-only except for two governance routes**,
-and it cannot reach a decoder, the scanner, the album index or a child process -
-that is enforced by an import-graph test, not by convention.
+The console's HTTP surface. File roots default to read-only; explicit operator file actions, native anime operations,
+browser authentication and governance controls have explicit write endpoints,
+and local album processing has explicit bounded task endpoints. The web query
+package cannot import decoders, scanners, the album store or subprocess code;
+startup injects the local read-only reader and the supervised worker capability.
 
 Default bind: `127.0.0.1:8090`. The bind address is the access control (see
 `CLI-ACCESS.md` §3); a public address is refused at startup.
@@ -50,13 +52,26 @@ Identity comes from the **credential**, not from a claim in the request.
 | --- | --- |
 | a configured agent token (`hub.agents[].token`) | `ai:<name>` |
 | `server.token` | `user:operator` |
-| nothing, when no credential is configured at all | `user:operator` |
+| a named account session cookie | `user:<username>#<stable-id>` with current role |
+| a legacy operator session cookie | `user:operator` |
+| nothing, when no credential or required setup is configured | `user:operator` |
 | nothing, when a credential *is* configured | `401` |
 
 Agent tokens are checked **before** the operator token, so an agent cannot be
 mistaken for the operator, and the token cannot be spoofed by a header. This
 ordering is the point: the first version identified an agent only by a header it
 sent about itself, so an agent could escape every restriction by omitting it.
+
+The public shell, `/api/v1/auth/status`, and `POST /api/v1/auth/setup|login|logout`
+support initial setup and browser login. Private data still requires
+authentication. Session behaviour and request bodies are documented in
+[AUTH.md](AUTH.md); native anime endpoints are in [ANIME.md](ANIME.md).
+Operator file writes, including background copy, cross-root move, trash purge
+and cancellation, are documented in [FILES.md](FILES.md). Background endpoints
+return 202 with `job_id`; read `/api/v1/jobs/{id}` for final state, progress and
+events. `cancellable` is true only for operator requests while the current
+process owns that native task. Cancellation requires `X-Nasctl-Confirm: 1` and
+does not accept process IDs or stop external downloaders.
 
 The distinction has consequences: an agent's **reads are recorded in the audit
 log** (an operator's browsing is not, because page loads would bury the rows that
@@ -89,7 +104,7 @@ The front page's single request. Leads with what is wrong.
   "job_counts": {"completed": 12, "failed": 1},
   "files": {"roots": [{"id": "media", "label": "Media", "path": "/mnt/data/media",
                         "available": true, "expose_hidden": false}],
-            "writable": false, "note": "file writes ... are not implemented in this build"},
+            "writable": false, "note": "storage roots default to read-only"},
   "resources": {"mem_available_kb": 3040708, "mem_total_kb": 8131752,
                 "swap_used_kb": 0, "verdict": "allow", "reason": "ok",
                 "psi_memory_some_avg10": 0.12},
@@ -108,8 +123,9 @@ Notes that matter for a client:
 * `resources` is omitted when the machine's memory cannot be read, and
   `resource_error` explains why. It is never zeros.
 * `resources.verdict` is `allow`, `drain` or `stop`.
-* `files.writable` is `false` in this build; a client should hide write controls
-  rather than offering buttons that always fail.
+* `files.writable` reports whether any available root permits operator writes;
+  each root also reports its own writable flag. Writes and bounds are documented
+  in [FILES.md](FILES.md). Agent credentials remain read-only for these routes.
 
 ---
 
@@ -133,7 +149,34 @@ caller can tell the two apart.
 
 ---
 
+## Local backup
+
+The native backup module provides confirmed, bounded plan creation, execution,
+manifest verification, version history, restore without replacement and exact-ID
+cleanup. It does not control an external backup service. See [BACKUPS.md](BACKUPS.md)
+for endpoints, retention, storage-scope binding and privacy. Private offline
+service-state packages and crash recovery are described in [STATE-BACKUPS.md](STATE-BACKUPS.md).
+
+## Unified settings and filesystem capacity
+
+`GET /api/v1/settings` returns sanitized saved/active settings, secret-presence
+flags, a revision digest and the restart requirement. `POST /api/v1/settings/validate`
+validates without saving. `POST /api/v1/settings` additionally requires explicit
+confirmation and records an audited operator job. Read-only consoles and AI
+credentials cannot change these settings. See [SETTINGS.md](SETTINGS.md).
+
+Storage roots and overview include real filesystem capacity and a volume ID;
+shared filesystems must not be added up. Unknown capacity is omitted with an
+explicit reason. A replaced root is unavailable for both reads and writes.
+
 ## GET /api/v1/files/roots
+
+Also returns `limits`: the effective local `[hub.files]` policy for listing,
+search, preview, upload, trash, copy and batch selection. Requests may lower
+budgets but cannot raise local limits. See [FILES.md](FILES.md) for all write
+endpoints and CLI commands. `POST /api/v1/files/batch` accepts an explicitly
+confirmed bounded selection, returns a job ID and persists per-item outcomes
+in a `kind=files.batch` job event, including partial completion and cancellation.
 
 ```json
 {"roots": [{"id": "media", "label": "Media", "path": "/mnt/data/media",
@@ -416,3 +459,19 @@ There is no operation, and no route, that:
 
 A request to an unknown `/api/` path returns **`404` with a JSON body** - not the
 HTML shell, so a client cannot mistake a missing endpoint for a working one.
+
+## Native album browser
+
+The authenticated `/api/v1/album` reader defaults to the in-process local index;
+an explicitly configured remote service remains supported. It offers status (with
+mode/index_ready), collections, bounded cursor listings,
+media details, cached thumbnails and original-file Range/HEAD/attachment streams.
+Configuration, query parameters, credentials and transfer limits: [ALBUM.md](ALBUM.md).
+Browsing never launches indexing or thumbnail work.
+
+Local operator management: `GET /settings`, `POST /directories`,
+`DELETE /directories/{code}`, `POST /tasks/{scan,thumbs,pause,resume}`.
+Write requests require `X-Nasctl-Confirm: 1`; scan/thumbs require collection,
+limit (1–10000), and max_runtime (1s–2h). Tasks return job_id and use the shared
+job monitor/cancel endpoints. Worker/AI/read-only constraints and configuration
+fields are documented in [ALBUM.md](ALBUM.md).

@@ -1,0 +1,53 @@
+// Real Svelte + real bounded file APIs. Synthetic fixtures only.
+import {JSDOM,VirtualConsole} from 'jsdom';
+const base=process.argv[2]||'http://127.0.0.1:18098',token=process.argv[3]||'',headers=token?{Authorization:'Bearer '+token}:{};
+const request=(path,options={})=>fetch(new URL(path,base),{...options,headers:{...options.headers,...headers}});
+const errors=[],vc=new VirtualConsole();vc.on('jsdomError',(error)=>errors.push(error.message));
+const dom=new JSDOM(await(await request('/')).text(),{url:base+'/#files',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:vc});
+const w=dom.window,d=w.document,delay=(ms)=>new Promise((resolve)=>setTimeout(resolve,ms));
+const check=(ok,label)=>{if(!ok)throw new Error(label);console.log('ok:',label);};
+async function wait(test,label){const until=Date.now()+7000;while(Date.now()<until){if(test())return;await delay(25);}throw new Error('timed out: '+label);}
+const named=(label)=>d.querySelector('button[aria-label="'+label+'"]');
+const textButton=(label)=>[...d.querySelectorAll('.finder-location')].find((node)=>node.textContent.trim().startsWith(label));
+const files=()=>[...d.querySelectorAll('.finder-entry')];
+const option=(name)=>files().find((node)=>node.querySelector('.entry-label').textContent===name);
+const dbl=(node)=>node.dispatchEvent(new w.MouseEvent('dblclick',{bubbles:true}));
+w.fetch=request;w.AbortController=AbortController;w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
+w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
+try{
+ w.eval(await(await request('/app.js')).text());await wait(()=>files().length>1,'file grid');
+ check(d.querySelector('.finder-grid')&&d.querySelector('.finder-sidebar')&&d.querySelector('.finder-details'),'native three-pane structure, grid is default');
+ const folder=files().find((node)=>node.classList.contains('entry-dir')),folderName=folder.querySelector('.entry-label').textContent;
+ folder.click();await delay(0);check(d.querySelectorAll('.breadcrumbs button').length===1,'single click selects without navigating');
+ check(folder.getAttribute('aria-selected')==='true','selection exposes accessible state');
+ dbl(folder);await wait(()=>d.querySelectorAll('.breadcrumbs button').length===2&&!d.querySelector('.loading-state'),'double click opens folder');
+ named('固定当前目录').click();await delay(0);check(JSON.parse(w.localStorage.getItem('nasctl-file-pins-v1'))[0].name===folderName,'explicit folder pin stores root-relative location');
+ named('后退').click();await wait(()=>d.querySelectorAll('.breadcrumbs button').length===1&&!d.querySelector('.loading-state'),'back navigation');
+ named('前进').click();await wait(()=>d.querySelectorAll('.breadcrumbs button').length===2&&!d.querySelector('.loading-state'),'forward navigation');
+ named('新建位置标签').click();await wait(()=>d.querySelectorAll('[role="tab"]').length===2&&files().length>1,'second location tab');
+ d.querySelectorAll('[role="tab"]')[0].click();await wait(()=>d.querySelectorAll('.breadcrumbs button').length===2,'tab preserves folder');
+ d.querySelectorAll('[role="tab"]')[1].click();await wait(()=>files().length>1,'switch back to root tab');
+ named('列表视图').click();await delay(0);check(d.querySelector('.finder-list')&&w.localStorage.getItem('nasctl-files-view')==='list','list view and preference');
+ named('图标视图').click();await delay(0);
+ const file=files().find((node)=>!node.classList.contains('entry-dir')),fileName=file.querySelector('.entry-label').textContent;
+ file.click();await wait(()=>d.querySelector('.finder-details h2')?.textContent===fileName,'selected detail');
+ check(!d.querySelector('dialog'),'single selection uses detail pane');
+ dbl(file);await wait(()=>d.querySelector('dialog[open]'),'double click full preview');named('关闭对话框').click();await wait(()=>!d.querySelector('dialog'),'preview closes');
+ file.dispatchEvent(new w.KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true,cancelable:true}));await wait(()=>d.querySelector('[role="menu"]'),'keyboard file menu');
+ d.querySelector('[role="menu"]').dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await delay(0);check(!d.querySelector('[role="menu"]')&&d.activeElement===file,'Escape restores selected file focus');
+ textButton('最近使用').click();await delay(0);check(d.querySelector('.finder-heading h1').textContent==='最近使用'&&option(fileName),'recent tracks opened files in this app session');
+ textButton('已固定').click();await delay(0);check(option(folderName),'pinned directory listing');
+ dbl(option(folderName));await wait(()=>d.querySelectorAll('.breadcrumbs button').length===2&&!d.querySelector('.loading-state'),'pin opens real root-relative folder');
+ named('取消固定当前目录').click();await delay(0);check(JSON.parse(w.localStorage.getItem('nasctl-file-pins-v1')).length===0,'unpin');
+ named('主目录').click();await wait(()=>files().length>1,'home navigation');
+ const search=d.querySelector('input[aria-label="搜索文件"]');search.value=fileName;search.dispatchEvent(new w.Event('input',{bubbles:true}));await delay(0);d.querySelector('.finder-search').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+ await delay(0);await wait(()=>!d.querySelector('.loading-state')&&files().length>=1,'bounded real filename search');check(option(fileName),'search result matches filename');
+ check(!d.querySelector('.finder-entry script,.finder-entry img'),'filenames never become executable markup or eager original image loads');
+ for(let count=2;count<8;count++){named('新建位置标签').click();await delay(0);}check(d.querySelectorAll('[role="tab"]').length===8&&named('新建位置标签').disabled,'location tabs have an eight-tab cap');
+ const appSearch=d.querySelector('input[aria-label="搜索应用或文件"]');appSearch.value='设置';appSearch.dispatchEvent(new w.Event('input',{bubbles:true}));await delay(0);check(d.querySelectorAll('.desktop-app').length===1,'desktop application search filters real launchers');
+ d.querySelector('.desktop-search').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await wait(()=>d.querySelector('.app-window.active')?.dataset.app==='settings','Enter launches filtered application');
+ appSearch.value=fileName;appSearch.dispatchEvent(new w.Event('input',{bubbles:true}));await delay(0);d.querySelector('.desktop-file-search').click();
+ await wait(()=>d.querySelector('.app-window.active')?.dataset.app==='files'&&!d.querySelector('.file-explorer .loading-state')&&option(fileName),'explicit desktop file search opens the configured root');check(d.querySelector('input[aria-label="搜索文件"]').value===fileName,'desktop search is forwarded without saving a new backend operation');
+ check(errors.length===0,'no DOM errors: '+errors.join('; '));
+ console.log('Finder navigation, selection, tabs, pins, recent, keyboard menu and search passed.');
+}finally{dom.window.close();}

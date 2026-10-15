@@ -5,15 +5,30 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
+	"runtime"
+	"sync"
 	"time"
 
+	"github.com/YoisakiKnd/nasctl/internal/accountslocal"
+	"github.com/YoisakiKnd/nasctl/internal/album"
+	"github.com/YoisakiKnd/nasctl/internal/albumlocal"
+	"github.com/YoisakiKnd/nasctl/internal/anime"
+	"github.com/YoisakiKnd/nasctl/internal/backuplocal"
 	"github.com/YoisakiKnd/nasctl/internal/buildinfo"
 	"github.com/YoisakiKnd/nasctl/internal/config"
+	"github.com/YoisakiKnd/nasctl/internal/domain"
 	"github.com/YoisakiKnd/nasctl/internal/files"
+	"github.com/YoisakiKnd/nasctl/internal/hubstore"
 	"github.com/YoisakiKnd/nasctl/internal/hubweb"
+	"github.com/YoisakiKnd/nasctl/internal/jobs"
 	"github.com/YoisakiKnd/nasctl/internal/logx"
+	"github.com/YoisakiKnd/nasctl/internal/operations"
+	"github.com/YoisakiKnd/nasctl/internal/resource"
+	"github.com/YoisakiKnd/nasctl/internal/settingslocal"
+	"github.com/YoisakiKnd/nasctl/internal/statelease"
 	"github.com/YoisakiKnd/nasctl/internal/suzu"
 )
 
@@ -40,6 +55,31 @@ func cmdServe(ctx context.Context, env Env, cfg *config.Config, g globals, args 
 		fmt.Fprintf(env.Stderr, "nasctl serve: %v\n", err)
 		return 1
 	}
+	serviceLease, err := statelease.AcquireService(cfg.Paths.StateDir)
+	if err != nil {
+		fmt.Fprintln(env.Stderr, "nasctl serve:", err)
+		return 1
+	}
+	defer serviceLease.Close()
+	users, err := accountslocal.Open(cfg.Paths.StateDir)
+	if err != nil {
+		fmt.Fprintln(env.Stderr, "nasctl: account state could not be opened; inspect or restore it locally:", err)
+		return 1
+	}
+	defer users.Close()
+	if err = users.EnsureSetupKey(ctx); err != nil {
+		fmt.Fprintln(env.Stderr, "nasctl: first-account setup state could not be prepared:", err)
+		return 1
+	}
+	accountState, err := users.Snapshot(ctx)
+	if err != nil {
+		fmt.Fprintln(env.Stderr, "nasctl:", err)
+		return 1
+	}
+	if accountState.Enabled && !cfg.Hub.Setup && cfg.Server.Token == "" {
+		fmt.Fprintln(env.Stderr, "nasctl: enabled accounts require [hub] setup=true or server.token in the base configuration; refusing anonymous fallback if the state volume is lost")
+		return 1
+	}
 
 	st, err := openStore(cfg, g)
 	if err != nil {
@@ -52,6 +92,70 @@ func cmdServe(ctx context.Context, env Env, cfg *config.Config, g globals, args 
 	if err != nil {
 		fmt.Fprintf(env.Stderr, "nasctl: %v\n", err)
 		return 1
+	}
+	animeEngine, err := anime.Open(cfg.Hub.Anime, cfg.Paths.StateDir)
+	if err != nil {
+		fmt.Fprintf(env.Stderr, "nasctl: %v\n", err)
+		return 1
+	}
+	workCtx, stopWork := context.WithCancel(ctx)
+	var background sync.WaitGroup
+	defer func() {
+		stopWork()
+		background.Wait()
+		if animeEngine != nil {
+			animeEngine.Close()
+		}
+	}()
+	if animeEngine != nil {
+		animeEngine.Admit = func(ctx context.Context) error {
+			mode, err := jm.EffectiveMode(ctx)
+			if err != nil {
+				return err
+			}
+			if !mode.AllowsHeavyWork() {
+				return fmt.Errorf("anime work is paused by mode %s", mode.Mode)
+			}
+			if runtime.GOOS == "linux" && jm.Guard() != nil {
+				d := jm.Guard().BeforeFile()
+				if d.Verdict != resource.Allow {
+					return fmt.Errorf("anime resource guard: %s", d.Detail)
+				}
+			}
+			return nil
+		}
+		runAnime := func(ctx context.Context, op string, action func(context.Context, int64) (anime.RefreshResult, error)) {
+			jm.Run(ctx, jobs.RunOptions{Principal: domain.Principal{Kind: domain.PrincipalLocal, Name: "scheduler"}, OpID: op, Args: operations.NewArgs().Int("subscription", 0), Target: "all", Handler: func(ctx context.Context, _ *hubstore.Job, _ *operations.Args) (jobs.Result, error) {
+				result, err := action(ctx, 0)
+				if err == nil && len(result.Errors) > 0 {
+					err = fmt.Errorf("%s", result.Errors[0])
+				}
+				return jobs.Result{Completed: err == nil, Detail: fmt.Sprintf("discovered %d, submitted %d, archived %d", result.Discovered, result.Submitted, result.Archived)}, err
+			}})
+			// Scheduled work must not rely on a process restart to enforce the
+			// configured history and audit retention limits.
+			pruneCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			if _, err := st.PruneHistory(pruneCtx); err != nil {
+				fmt.Fprintf(env.Stderr, "nasctl: history retention: %v\n", err)
+			}
+			if _, err := st.PruneAudit(pruneCtx, env.Now()); err != nil {
+				fmt.Fprintf(env.Stderr, "nasctl: audit retention: %v\n", err)
+			}
+		}
+		animeEngine.OnPoll = func(ctx context.Context) { runAnime(ctx, "anime.refresh", animeEngine.Refresh) }
+		animeEngine.OnSync = func(ctx context.Context) {
+			pending, err := animeEngine.Pending(ctx)
+			if err != nil {
+				fmt.Fprintf(env.Stderr, "nasctl: pending anime work: %v\n", err)
+				return
+			}
+			if pending {
+				runAnime(ctx, "anime.sync", animeEngine.Sync)
+			}
+		}
+		background.Add(1)
+		go func() { defer background.Done(); animeEngine.Run(workCtx) }()
 	}
 
 	// Reconcile before serving, so the first page an operator sees does not claim
@@ -70,8 +174,7 @@ func cmdServe(ctx context.Context, env Env, cfg *config.Config, g globals, args 
 			"inspect it before assuming anything about its state\n", j.ID, j.Op, j.PID)
 	}
 
-	// Prune on startup rather than on a timer: the console has no scheduler, and
-	// this is the only moment it is certain nothing else is writing.
+	// Prune history on startup; the anime scheduler uses its own database.
 	if n, err := st.PruneHistory(ctx); err == nil && n > 0 {
 		fmt.Fprintf(env.Stdout, "pruned %d finished job record(s) beyond the history cap\n", n)
 	}
@@ -82,12 +185,35 @@ func cmdServe(ctx context.Context, env Env, cfg *config.Config, g globals, args 
 		fmt.Fprintf(env.Stdout, "cleared %d expired mode(s)\n", n)
 	}
 
-	fm, err := files.New(cfg.Hub.Storage, files.DefaultLimits())
+	fm, err := files.New(cfg.Hub.Storage, files.ConfigLimits(cfg.Hub.Files))
 	if err != nil {
 		fmt.Fprintf(env.Stderr, "nasctl: %v\n", err)
 		return 1
 	}
 	defer fm.Close()
+	backupControl, backupErr := backuplocal.New(cfg.Paths.StateDir, fm)
+	if backupErr != nil {
+		fmt.Fprintf(env.Stderr, "nasctl: local backup configuration could not be loaded: %v\n", backupErr)
+	} else {
+		defer backupControl.Close()
+	}
+	var albumClient *album.Client
+	var albumControl *albumlocal.Control
+	switch cfg.Hub.Album.EffectiveMode() {
+	case "local":
+		albumControl, err = albumlocal.NewControl(cfg, fm, nil)
+		if err == nil {
+			defer albumControl.Close()
+			albumClient, err = album.NewHandler(albumControl.Reader)
+		}
+	case "remote":
+		albumClient, err = album.New(cfg.Hub.Album)
+	}
+	if err != nil {
+		fmt.Fprintf(env.Stderr, "nasctl: album setup: %v\n", err)
+		return 1
+	}
+	defer albumClient.Close()
 
 	var sc *suzu.Client
 	if cfg.Hub.Suzu.DBPath != "" {
@@ -118,8 +244,13 @@ func cmdServe(ctx context.Context, env Env, cfg *config.Config, g globals, args 
 		})
 	}
 
+	baseLog := slog.Default()
+	if logger != nil {
+		baseLog = logger.Logger
+	}
 	srv := hubweb.New(hubweb.Config{
 		Bind:                  bind,
+		RequireSetup:          cfg.Hub.Setup,
 		Token:                 cfg.Server.Token,
 		Agents:                agents,
 		MaxConcurrentRequests: cfg.Server.MaxConcurrentRequests,
@@ -132,7 +263,19 @@ func cmdServe(ctx context.Context, env Env, cfg *config.Config, g globals, args 
 		PageDefault:           cfg.Server.PageDefault,
 		PageMax:               cfg.Server.PageMax,
 		PreviewMaxBytes:       32 << 20,
-	}, fm, jm, sc, logger.Logger)
+	}, fm, jm, sc, baseLog)
+	srv.Anime = animeEngine
+	srv.Accounts = users
+	srv.Settings = settingslocal.New(cfg)
+	srv.Album = albumClient
+	if albumControl != nil {
+		srv.AlbumControl = albumControl
+	}
+	srv.WorkContext = workCtx
+	if backupControl != nil {
+		srv.Backups = backupControl
+	}
+	defer func() { stopWork(); srv.WaitWork() }()
 
 	httpSrv := &http.Server{
 		Addr:              bind,
@@ -144,9 +287,15 @@ func cmdServe(ctx context.Context, env Env, cfg *config.Config, g globals, args 
 	}
 
 	fmt.Fprintf(env.Stdout, "nasctl %s listening on %s\n", buildinfo.Version, bind)
-	fmt.Fprintf(env.Stdout, "  read-only console: it does not scan, decode, transcode or write files\n")
+	fmt.Fprintf(env.Stdout, "  NAS console: native anime subscriptions and configured storage roots\n")
 	if cfg.Server.Token == "" {
-		fmt.Fprintf(env.Stdout, "  no token is configured; the bind address is the access control\n")
+		if accountState.Enabled {
+			fmt.Fprintln(env.Stdout, "  local account login is required")
+		} else if cfg.Hub.Setup {
+			fmt.Fprintln(env.Stdout, "  first administrator setup is required; read the private setup key on this device")
+		} else {
+			fmt.Fprintln(env.Stdout, "  legacy local operator mode; configure an account or server token to require login")
+		}
 	}
 	for _, a := range cfg.Hub.Agents {
 		heavy := "may not start heavy work"
@@ -181,7 +330,9 @@ func cmdServe(ctx context.Context, env Env, cfg *config.Config, g globals, args 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(),
 		cfg.Server.ShutdownTimeout.D())
 	defer cancel()
+	stopWork()
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		_ = httpSrv.Close()
 		fmt.Fprintf(env.Stderr, "nasctl: shutdown did not complete cleanly: %v\n", err)
 		return 1
 	}

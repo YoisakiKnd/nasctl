@@ -565,7 +565,9 @@ func ParseSort(s string) (SortMode, error) {
 
 // Filter is a bounded query description.
 type Filter struct {
-	CollectionID   int64
+	CollectionID int64
+	// nil means unrestricted; an empty non-nil slice deliberately matches none.
+	CollectionIDs  []int64
 	Kinds          []string
 	Query          string
 	From, To       *int64
@@ -630,6 +632,18 @@ func (f Filter) buildWhere() (string, []any) {
 	if f.CollectionID != 0 {
 		clauses = append(clauses, "m.collection_id = ?")
 		args = append(args, f.CollectionID)
+	}
+	if f.CollectionIDs != nil {
+		if len(f.CollectionIDs) == 0 {
+			clauses = append(clauses, "0 = 1")
+		} else {
+			ph := make([]string, 0, len(f.CollectionIDs))
+			for _, id := range f.CollectionIDs {
+				ph = append(ph, "?")
+				args = append(args, id)
+			}
+			clauses = append(clauses, "m.collection_id IN ("+strings.Join(ph, ",")+")")
+		}
 	}
 	if len(f.Kinds) > 0 {
 		ph := make([]string, 0, len(f.Kinds))

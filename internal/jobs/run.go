@@ -48,6 +48,9 @@ type RunOptions struct {
 	// Sync, when true, runs the handler inline and returns its result rather
 	// than creating a job. It is used for bounded reads that a caller waits for.
 	Sync bool
+	// OperatorConsent confirms this exact mutating call. It is honored only for
+	// an authenticated human principal, never for AI/helper or privileged work.
+	OperatorConsent bool
 	// Handler does the work.
 	Handler Handler
 	// OnAccepted, if set, is called with the created job before the handler
@@ -89,7 +92,7 @@ func (m *Manager) Run(ctx context.Context, o RunOptions) Outcome {
 		switch d.Gate {
 		case GateMode, GateResource, GateMutex, GateJobCap:
 			err = fmt.Errorf("%w: %s", ErrGated, d.Detail)
-		case GateApproval, GateReadOnly:
+		case GateApproval, GateReadOnly, GateRole:
 			err = fmt.Errorf("%w: %s", ErrDenied, d.Detail)
 		}
 		m.audit(ctx, hubstore.AuditEntry{
@@ -114,7 +117,8 @@ func (m *Manager) Run(ctx context.Context, o RunOptions) Outcome {
 			// and remote callers, and requiring an operator to approve their
 			// own keystroke would make the console unusable without making it
 			// safer.
-			if !m.mayActUnapproved(o.Principal, op) {
+			confirmed := o.OperatorConsent && o.Principal.Kind == domain.PrincipalUser && op.Class == domain.RiskMutating
+			if !m.mayActUnapproved(o.Principal, op) && !confirmed {
 				err := fmt.Errorf("%w: %s requires an approval for target %q with parameters "+
 					"%q; none is valid", ErrNeedsApproval, op.ID, o.Target, params)
 				m.audit(ctx, hubstore.AuditEntry{
@@ -123,6 +127,9 @@ func (m *Manager) Run(ctx context.Context, o RunOptions) Outcome {
 					Note: err.Error(),
 				})
 				return Outcome{Decision: d, Err: err}
+			}
+			if confirmed {
+				m.audit(ctx, hubstore.AuditEntry{Principal: o.Principal.String(), Action: "approval.confirm", Op: o.OpID, Target: o.Target, Params: params, Outcome: "ok", Note: "operator confirmed this exact call"})
 			}
 		} else {
 			approvalID = ap.ID
@@ -171,6 +178,7 @@ func (m *Manager) Run(ctx context.Context, o RunOptions) Outcome {
 	defer m.Unlock(op.Mutex, job.ID)
 
 	if o.Handler == nil {
+		m.Unlock(op.Mutex, job.ID)
 		_ = m.cfg.Store.Finish(ctx, job.ID, domain.JobFailed, "no_handler",
 			"this operation has no implementation in this build", false)
 		err := fmt.Errorf("jobs: operation %s has no handler", op.ID)
@@ -182,6 +190,13 @@ func (m *Manager) Run(ctx context.Context, o RunOptions) Outcome {
 	}
 
 	res, herr := o.Handler(ctx, job, o.Args)
+	// Handler return means all protected side effects and cleanup have ended.
+	// Release before publishing a terminal row: a client seeing completion must
+	// be able to start the next operation while final audit bookkeeping finishes.
+	// The deferred unlock remains a panic safeguard and is identity-checked.
+	m.Unlock(op.Mutex, job.ID)
+	finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer finishCancel()
 	final := domain.JobCompleted
 	if herr != nil {
 		final = domain.JobFailed
@@ -194,13 +209,20 @@ func (m *Manager) Run(ctx context.Context, o RunOptions) Outcome {
 			res.StopReason = "stopped_without_completing"
 		}
 	}
+	if errors.Is(herr, context.Canceled) {
+		final = domain.JobCancelled
+		res.StopReason = "cancelled"
+	}
+	if errors.Is(herr, context.DeadlineExceeded) {
+		res.StopReason = "timeout"
+	}
 	errMsg := ""
 	if herr != nil {
 		errMsg = herr.Error()
 	} else if res.Detail != "" && final == domain.JobFailed {
 		errMsg = res.Detail
 	}
-	if ferr := m.cfg.Store.Finish(ctx, job.ID, final, res.StopReason, errMsg, res.Verified); ferr != nil {
+	if ferr := m.cfg.Store.Finish(finishCtx, job.ID, final, res.StopReason, errMsg, res.Verified); ferr != nil {
 		// The work is done; failing to record it is a bookkeeping fault that the
 		// caller must still hear about, because an unrecorded job looks running.
 		if herr == nil {
@@ -208,15 +230,15 @@ func (m *Manager) Run(ctx context.Context, o RunOptions) Outcome {
 		}
 	}
 	outcome := "ok"
-	if final == domain.JobFailed {
+	if final == domain.JobFailed || final == domain.JobCancelled {
 		outcome = "failed"
 	}
-	m.audit(ctx, hubstore.AuditEntry{
+	m.audit(finishCtx, hubstore.AuditEntry{
 		Principal: o.Principal.String(), Action: "call", Op: o.OpID, Target: o.Target,
 		Params: params, Outcome: outcome, Note: noteFor(res, errMsg),
 	})
 
-	return Outcome{Job: m.refresh(ctx, job), Decision: d, Result: res, Err: herr}
+	return Outcome{Job: m.refresh(finishCtx, job), Decision: d, Result: res, Err: herr}
 }
 
 // refresh re-reads a job so that the object handed back to a caller matches the
@@ -302,6 +324,9 @@ func (m *Manager) Grant(ctx context.Context, g GrantRequest) (*hubstore.Approval
 	}
 
 	// The granter must be entitled to grant.
+	if g.GrantedBy.Kind == domain.PrincipalUser && !g.GrantedBy.DeviceAdmin() {
+		return nil, fmt.Errorf("%w: approvals require an administrator", ErrDenied)
+	}
 	switch g.GrantedBy.Kind {
 	case domain.PrincipalLocal, domain.PrincipalUser:
 		// Fine: a person is granting.
@@ -384,6 +409,9 @@ type GrantRequest struct {
 
 // Revoke removes an approval.
 func (m *Manager) Revoke(ctx context.Context, id string, by domain.Principal) error {
+	if !by.DeviceAdmin() {
+		return fmt.Errorf("%w: approval revocation requires an administrator", ErrDenied)
+	}
 	if err := m.cfg.Store.RevokeApproval(ctx, id); err != nil {
 		return err
 	}

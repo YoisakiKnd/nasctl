@@ -7,13 +7,27 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/YoisakiKnd/nasctl/internal/cli"
+	"github.com/YoisakiKnd/nasctl/internal/launchgate"
 )
 
 func main() {
-	os.Exit(cli.Run(os.Args[1:], cli.Env{
+	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "exec-album-task" {
+		if len(args) < 2 || args[1] != "thumbs" {
+			fmt.Fprintln(os.Stderr, "album launch: only bounded thumbnail supervisors may use the private gate")
+			os.Exit(2)
+		}
+		if e := launchgate.Wait(os.NewFile(3, "nasctl-admission")); e != nil {
+			fmt.Fprintln(os.Stderr, e)
+			os.Exit(3)
+		}
+		args = args[1:]
+	}
+	os.Exit(cli.Run(args, cli.Env{
 		Stdout:   os.Stdout,
 		Stderr:   os.Stderr,
 		Stdin:    os.Stdin,

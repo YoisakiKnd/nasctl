@@ -1,0 +1,6 @@
+ControlGroup=/system.slice/nasctl-kernel-album-mM1fKlO5.service
+Delegate=yes
+MemoryHigh=201326592
+MemoryMax=268435456
+ProtectControlGroups=no
+ProtectSystem=strict

@@ -388,23 +388,30 @@ func TestHostileNamesAndMetadataAreInert(t *testing.T) {
 		t.Errorf("the response does not escape the angle bracket: %s", truncate(string(body)))
 	}
 
-	// The front end must not contain an HTML-sink pattern on untrusted data.
-	js, err := os.ReadFile(filepath.Join("web", "app.js"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	src := string(js)
-	// innerHTML/outerHTML/insertAdjacentHTML/document.write are the sinks that
-	// would turn a filename into markup.
-	for _, sink := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write"} {
-		if strings.Contains(src, sink) {
-			// Strip comments before judging, so an explanatory comment is not a
-			// finding.
-			if containsOutsideComment(src, sink) {
-				t.Errorf("app.js uses %s; filenames and metadata must be written with "+
-					"textContent so they cannot become markup", sink)
+	// Svelte's generated runtime uses HTML parsing for constant templates. Check
+	// the editable application source for raw HTML sinks instead; the DOM harness
+	// separately proves that hostile filenames render as text in the real bundle.
+	source := filepath.Join("..", "..", "frontend", "src")
+	err := filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || (!strings.HasSuffix(path, ".svelte") && !strings.HasSuffix(path, ".js")) {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, sink := range []string{"{@html", "innerHTML", "outerHTML", "insertAdjacentHTML", "document.write"} {
+			if containsOutsideComment(string(body), sink) {
+				t.Errorf("%s uses an HTML sink %s", path, sink)
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -446,7 +453,7 @@ func TestTheConsoleServesItsShellAndAssets(t *testing.T) {
 	if !strings.Contains(string(body), "<!DOCTYPE html>") {
 		t.Error("the shell is not HTML")
 	}
-	if !strings.Contains(string(body), "OneCloud Hub") {
+	if !strings.Contains(string(body), "nasctl") {
 		t.Error("the shell does not name the console")
 	}
 

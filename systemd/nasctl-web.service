@@ -1,5 +1,5 @@
 [Unit]
-Description=OneCloud Hub console (read-only unified web interface)
+Description=nasctl NAS console and optional anime automation
 Documentation=file:/usr/local/share/doc/albumctl/HUB-DESIGN.md
 Documentation=file:/usr/local/share/doc/albumctl/RUNBOOK.md
 After=network-online.target
@@ -21,50 +21,40 @@ Group=nasctl
 ExecStart=/usr/local/bin/nasctl serve --config /etc/albumctl/config.toml
 
 # ---- resource policy -------------------------------------------------------
-# MemoryMax bounds the whole cgroup, not one process's RSS.
-#
-# 96 MiB is a PROVISIONAL ceiling, not a validated one, and it is deliberately
-# larger than the first draft's 64 MiB. The reason is in docs/HUB-STAGE-B.md §5.2:
-# on x86_64 the console idles at ~13 MiB and reaches ~19 MiB under load, but the
-# ARMv7 binary running under qemu-arm-static reaches ~47.6 MiB and plateaus. That
-# gap is dominated by an anonymous executable mapping that is almost certainly
-# qemu's translation cache - a bare ARM HTTP server under the same emulator does
-# not have it - but this environment cannot prove how much is emulation and how
-# much is real allocation.
-#
-# So the choice is between a ceiling that may be too tight (and would OOM-kill a
-# console that is merely doing its job, which is a visible but annoying failure)
-# and one that is looser than necessary (and still bounds the process far below
-# the machine's 981 MiB). The looser one is the right error here.
-#
-# RE-MEASURE ON THE TARGET and then set this to the measured peak plus margin.
+# This ceiling includes the NAS console, a bounded album supervisor, and its
+# isolated decoder. It is a finite provisional deployment budget, not measured
+# RAM use on your NAS. The decoder keeps its own 128 MiB default child ceiling;
+# the outer task group adds 64 MiB for its supervisor. Measure on the target.
 MemoryAccounting=yes
-MemoryHigh=72M
-MemoryMax=96M
+MemoryHigh=192M
+MemoryMax=256M
 
-# No CPU ceiling. An idle console should answer a request promptly; the console
-# does no background work at all, so there is nothing to throttle.
+# NAS moves itself to a supervisor child before enabling memory delegation.
+# The gated album supervisor starts in a sibling task group, then establishes
+# its own decoder group. No other service's cgroup is changed.
+Delegate=yes
+
+# Keep interactive requests responsive. Optional anime work is bounded by the
+# application and shares this unit's resource limits.
 CPUWeight=50
 Nice=5
 
 # ---- filesystem policy -----------------------------------------------------
-# The console writes only to its own state directory. ProtectSystem=strict makes
-# the rest of the filesystem read-only, and ReadWritePaths re-opens exactly that
-# one path.
-#
-# Note what is *not* listed: the media tree. The storage roots are opened
-# read-only through os.Root, and this unit means the kernel enforces the same
-# thing even if the code were wrong. File writes are not implemented in this
-# build; when they are, this unit must be revisited deliberately rather than
-# having a path added casually.
+# State/cache writes are required for users, jobs, indexes and thumbnails.
+# Original media stays read-only unless an operator adds exact writable paths
+# in a drop-in; application-level writable-root consent is also required.
+StateDirectory=albumctl
+StateDirectoryMode=0750
+CacheDirectory=albumctl
+CacheDirectoryMode=0750
 ProtectSystem=strict
-ReadWritePaths=/var/lib/albumctl
+ReadWritePaths=/var/lib/albumctl /var/cache/albumctl
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
-ProtectControlGroups=yes
+ProtectControlGroups=no
 RestrictNamespaces=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
@@ -90,8 +80,8 @@ Restart=no
 TimeoutStopSec=15
 KillSignal=SIGTERM
 # KillMode=mixed sends SIGTERM to the main process only, then SIGKILL to the
-# whole cgroup if the grace period expires. The console starts no children, so
-# there is nothing else to signal, but the setting is the safe default.
+# whole cgroup if the grace period expires, including this service's owned
+# album supervisor and decoder. No PID from old state is adopted or killed.
 KillMode=mixed
 
 StandardOutput=journal
@@ -99,10 +89,10 @@ StandardError=journal
 SyslogIdentifier=nasctl
 
 # ---- hardening notes -------------------------------------------------------
-# The console has no per-user authentication. Its access control is the bind
-# address, which is checked at startup: a public address is refused unless
-# server.allow_non_private_bind is set. Bind it to the Tailscale address or to
-# loopback behind an SSH tunnel.
+# Local users and the private first-admin setup are documented in AUTH.md.
+# Keep hub.setup=true or server.token in the base configuration. Bind validation
+# still refuses public addresses unless explicitly enabled locally. Use HTTPS,
+# Tailscale or a loopback SSH tunnel for remote access.
 
 [Install]
 WantedBy=multi-user.target

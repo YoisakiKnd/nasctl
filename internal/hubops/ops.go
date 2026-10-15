@@ -23,6 +23,24 @@ import (
 // Declarations returns the full registry.
 func Declarations() []operations.Operation {
 	return []operations.Operation{
+		{ID: "users.password", Summary: "Change the authenticated account password after verifying its current password", Scope: []string{"users"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall, Timeout: 15 * time.Second, MetadataOnly: true, Mutex: operations.MutexClass("users"), Params: []operations.Param{{Name: "user", Kind: operations.ParamString, Required: true, MaxLen: 64}, {Name: "revision", Kind: operations.ParamString, Required: true, MaxLen: 32}}},
+		{ID: "users.configure", Summary: "Save or remove a confirmed NAS account without exposing credentials", Scope: []string{"users"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall, Timeout: 15 * time.Second, MetadataOnly: true, Mutex: operations.MutexClass("users"), Params: []operations.Param{{Name: "user", Kind: operations.ParamString, Required: true, MaxLen: 64}, {Name: "revision", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "action", Kind: operations.ParamString, Required: true, MaxLen: 16}, {Name: "role", Kind: operations.ParamString, MaxLen: 16}}},
+		{ID: "settings.configure", Summary: "Validate and save private NAS settings for the next restart", Scope: []string{"settings"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall, Timeout: 10 * time.Second, MetadataOnly: true, Mutex: operations.MutexClass("settings"), Params: []operations.Param{{Name: "revision", Kind: operations.ParamString, Required: true, MaxLen: 64}}},
+		{ID: "backup.configure", Summary: "Save a local bounded backup plan or remove its configuration", Scope: []string{"backup"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall, Timeout: 10 * time.Second, Mutex: operations.MutexBackup, Params: []operations.Param{{Name: "plan", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "scope", Kind: operations.ParamString, Required: true, MaxLen: 64}, {Name: "remove", Kind: operations.ParamBool}}},
+		{ID: "backup.run", Summary: "Create a verified local backup and apply the confirmed retention policy", Scope: []string{"backup"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall, Timeout: 2 * time.Hour, Async: true, Mutex: operations.MutexBackup, Params: []operations.Param{{Name: "plan", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "scope", Kind: operations.ParamString, Required: true, MaxLen: 64}}},
+		{ID: "backup.restore", Summary: "Verify a backup and publish a verified copy at a new destination without overwriting", Scope: []string{"backup"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall, Timeout: 2 * time.Hour, Async: true, Mutex: operations.MutexBackup, Params: []operations.Param{{Name: "root", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "id", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "to_root", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "to", Kind: operations.ParamString, Required: true, MaxLen: 1024}, {Name: "manifest_sha256", Kind: operations.ParamString, Required: true, MaxLen: 64}}},
+		{ID: "backup.delete", Summary: "Permanently remove an explicitly confirmed backup version", Scope: []string{"backup"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall, Timeout: 2 * time.Minute, Async: true, Mutex: operations.MutexBackup, Params: []operations.Param{{Name: "root", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "id", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "confirm_id", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "manifest_sha256", Kind: operations.ParamString, Required: true, MaxLen: 64}}},
+		{ID: "backup.cleanup", Summary: "Continue cleanup of an explicitly confirmed incomplete or partially deleted version", Scope: []string{"backup"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall, Timeout: 2 * time.Minute, Async: true, Mutex: operations.MutexBackup, Params: []operations.Param{{Name: "root", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "id", Kind: operations.ParamString, Required: true, MaxLen: 37}, {Name: "confirm_id", Kind: operations.ParamString, Required: true, MaxLen: 37}}},
+		{ID: "anime.history.cleanup", Summary: "Permanently clear confirmed archived-subscription history without deleting files", Scope: []string{"anime"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall, Timeout: 30 * time.Second, Async: true, Mutex: operations.MutexMedia, Params: []operations.Param{{Name: "subscription", Kind: operations.ParamInt, Required: true}, {Name: "confirm_title", Kind: operations.ParamString, Required: true, MaxLen: 200}, {Name: "limit", Kind: operations.ParamInt, Required: true}, {Name: "before", Kind: operations.ParamInt}, {Name: "detach_downloads", Kind: operations.ParamBool}, {Name: "remove_subscription", Kind: operations.ParamBool}}},
+		{ID: "anime.history.export", Summary: "Export a bounded consistent read-only anime history snapshot", Scope: []string{"anime"}, Class: domain.RiskRead, Approval: domain.ApprovalNone, Timeout: 2 * time.Minute, ReadOnly: true, Params: []operations.Param{{Name: "subscription", Kind: operations.ParamInt}, {Name: "limit", Kind: operations.ParamInt, Required: true}}},
+		{ID: "anime.metadata.refresh", Summary: "Refresh bounded existing-library metadata with previous-version backups", Scope: []string{"anime"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall, Timeout: 2 * time.Minute, Async: true, Mutex: operations.MutexMedia, Params: []operations.Param{{Name: "subscription", Kind: operations.ParamInt, Required: true}, {Name: "limit", Kind: operations.ParamInt, Required: true}, {Name: "after_id", Kind: operations.ParamInt}, {Name: "replace", Kind: operations.ParamBool}}},
+		{ID: "anime.metadata.restore", Summary: "Restore one verified previous metadata version", Scope: []string{"anime"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall, Timeout: 30 * time.Second, Async: true, Mutex: operations.MutexMedia, Params: []operations.Param{{Name: "backup", Kind: operations.ParamString, Required: true, MaxLen: 64}}},
+		{ID: "anime.metadata.backup.delete", Summary: "Permanently remove one explicitly confirmed metadata backup", Scope: []string{"anime"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall, Timeout: 10 * time.Second, Mutex: operations.MutexMedia, Params: []operations.Param{{Name: "backup", Kind: operations.ParamString, Required: true, MaxLen: 64}, {Name: "sha256", Kind: operations.ParamString, Required: true, MaxLen: 64}}},
+		{ID: "anime.refresh", Summary: "Refresh RSS and reconcile bounded anime downloads", Scope: []string{"anime"}, Class: domain.RiskBounded, Approval: domain.ApprovalPerCall, Timeout: 2 * time.Minute, Async: true, Mutex: operations.MutexMedia, Params: []operations.Param{{Name: "subscription", Kind: operations.ParamInt}}},
+		{ID: "anime.sync", Summary: "Reconcile bounded anime downloads without RSS requests", Scope: []string{"anime"}, Class: domain.RiskBounded, Approval: domain.ApprovalPerCall, Timeout: 2 * time.Minute, Async: true, Mutex: operations.MutexMedia, Params: []operations.Param{{Name: "subscription", Kind: operations.ParamInt}}},
+		{ID: "anime.download.pause", Summary: "Pause one tagged anime download without deleting files", Scope: []string{"anime"}, Class: domain.RiskBounded, Approval: domain.ApprovalPerCall, Timeout: 15 * time.Second, Mutex: operations.MutexMedia, StopsWork: true, Params: []operations.Param{{Name: "episode", Kind: operations.ParamInt, Required: true}}},
+		{ID: "anime.download.resume", Summary: "Resume one tagged anime download", Scope: []string{"anime"}, Class: domain.RiskBounded, Approval: domain.ApprovalPerCall, Timeout: 15 * time.Second, Mutex: operations.MutexMedia, Params: []operations.Param{{Name: "episode", Kind: operations.ParamInt, Required: true}}},
+		{ID: "anime.download.recheck", Summary: "Recheck one tagged anime download", Scope: []string{"anime"}, Class: domain.RiskBounded, Approval: domain.ApprovalPerCall, Timeout: 15 * time.Second, Mutex: operations.MutexMedia, Params: []operations.Param{{Name: "episode", Kind: operations.ParamInt, Required: true}}},
 		// -----------------------------------------------------------------
 		// System: read-only facts about the machine and the console.
 		// -----------------------------------------------------------------
@@ -56,9 +74,7 @@ func Declarations() []operations.Operation {
 		},
 
 		// -----------------------------------------------------------------
-		// Files: our own file manager. Reads are open; nothing that writes
-		// exists yet, and the declarations below are the shape those
-		// operations will take when they are delivered.
+		// Files: bounded reads and explicitly enabled operator writes.
 		// -----------------------------------------------------------------
 		{
 			ID: "files.roots", Summary: "List configured storage roots",
@@ -103,24 +119,21 @@ func Declarations() []operations.Operation {
 			},
 		},
 
-		// Writes. Declared so that the permission model is visible and so that a
-		// caller gets "not implemented" rather than "unknown operation". They
-		// are refused by the console in every configuration until the code
-		// exists, because a declared operation with no handler fails closed.
+		// File writes are opt-in per root and require exact operator consent.
 		{
-			ID: "files.upload", Summary: "Upload a file into a storage root (not implemented)",
+			ID: "files.upload", Summary: "Stream a complete file into writable storage; refuse overwrites",
 			Scope: []string{"storage"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall,
-			Timeout: 30 * time.Minute, Async: true, Mutex: operations.MutexMedia,
+			Timeout: 30 * time.Minute, Async: true, Mutex: operations.MutexFiles,
 			Params: []operations.Param{
 				{Name: "root", Kind: operations.ParamString, Required: true, MaxLen: 32},
 				{Name: "path", Kind: operations.ParamString, Required: true, MaxLen: 1024},
 				{Name: "size", Kind: operations.ParamInt, Doc: "declared size, checked against the stream"},
-				{Name: "overwrite", Kind: operations.ParamEnum, Enum: []string{"", "refuse", "replace"},
+				{Name: "overwrite", Kind: operations.ParamEnum, Enum: []string{"", "refuse"},
 					Doc: "defaults to refuse"},
 			},
 		},
 		{
-			ID: "files.mkdir", Summary: "Create a directory (not implemented)",
+			ID: "files.mkdir", Summary: "Create one directory in writable storage",
 			Scope: []string{"storage"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall,
 			Timeout: 30 * time.Second, Idempotent: true,
 			Params: []operations.Param{
@@ -129,7 +142,7 @@ func Declarations() []operations.Operation {
 			},
 		},
 		{
-			ID: "files.rename", Summary: "Rename an entry (not implemented)",
+			ID: "files.rename", Summary: "Move or rename an entry within one root without overwriting",
 			Scope: []string{"storage"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall,
 			Timeout: 60 * time.Second,
 			Params: []operations.Param{
@@ -139,32 +152,49 @@ func Declarations() []operations.Operation {
 			},
 		},
 		{
-			ID: "files.copy", Summary: "Copy files as a bounded background job (not implemented)",
+			ID: "files.copy", Summary: "Copy a bounded tree atomically, refusing overwrites",
 			Scope: []string{"storage"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall,
-			Timeout: 2 * time.Hour, Async: true, Mutex: operations.MutexMedia,
+			Timeout: 2 * time.Hour, Async: true, Mutex: operations.MutexFiles,
 			Params: []operations.Param{
 				{Name: "root", Kind: operations.ParamString, Required: true, MaxLen: 32},
+				{Name: "to_root", Kind: operations.ParamString, Required: true, MaxLen: 32},
 				{Name: "from", Kind: operations.ParamString, Required: true, MaxLen: 1024},
 				{Name: "to", Kind: operations.ParamString, Required: true, MaxLen: 1024},
-				{Name: "limit", Kind: operations.ParamInt, Doc: "maximum files to copy"},
+				{Name: "limit", Kind: operations.ParamInt, Required: true, Doc: "maximum entries to copy"},
+				{Name: "max_bytes", Kind: operations.ParamInt, Required: true},
 			},
 		},
 		{
-			ID: "files.trash", Summary: "Move entries to a bounded trash (not implemented)",
+			ID: "files.move", Summary: "Move between storage roots by copy and recoverable source trash", Scope: []string{"storage"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall, Timeout: 2 * time.Hour, Async: true, Mutex: operations.MutexFiles,
+			Params: []operations.Param{{Name: "root", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "to_root", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "from", Kind: operations.ParamString, Required: true, MaxLen: 1024}, {Name: "to", Kind: operations.ParamString, Required: true, MaxLen: 1024}, {Name: "limit", Kind: operations.ParamInt, Required: true}, {Name: "max_bytes", Kind: operations.ParamInt, Required: true}},
+		},
+		{
+			ID: "files.batch", Summary: "Sequential file batch with shared budgets and per-item outcomes",
 			Scope: []string{"storage"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall,
-			Timeout: 5 * time.Minute, Async: true,
+			Timeout: 2 * time.Hour, Async: true, Mutex: operations.MutexFiles,
+			Params: []operations.Param{{Name: "action", Kind: operations.ParamEnum, Required: true, Enum: []string{"copy", "move", "trash", "restore"}}, {Name: "selection", Kind: operations.ParamString, Required: true, MaxLen: 64}, {Name: "count", Kind: operations.ParamInt, Required: true}, {Name: "limit", Kind: operations.ParamInt, Required: true}, {Name: "max_bytes", Kind: operations.ParamInt, Required: true}},
+		},
+		{
+			ID: "files.purge", Summary: "Permanently remove one explicitly confirmed trash entry within an entry budget", Scope: []string{"storage"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall, Timeout: 2 * time.Minute, Async: true, Mutex: operations.MutexFiles,
+			Params: []operations.Param{{Name: "root", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "id", Kind: operations.ParamString, Required: true, MaxLen: 64}, {Name: "confirm_name", Kind: operations.ParamString, Required: true, MaxLen: 512}, {Name: "limit", Kind: operations.ParamInt, Required: true}},
+		},
+		{
+			ID: "files.trash", Summary: "Move one entry atomically into recoverable trash",
+			Scope: []string{"storage"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall,
+			Timeout: 30 * time.Second,
 			Params: []operations.Param{
 				{Name: "root", Kind: operations.ParamString, Required: true, MaxLen: 32},
 				{Name: "path", Kind: operations.ParamString, Required: true, MaxLen: 1024},
 			},
 		},
 		{
-			ID: "files.restore", Summary: "Restore entries from the trash (not implemented)",
+			ID: "files.restore", Summary: "Restore a trash entry without overwriting",
 			Scope: []string{"storage"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall,
-			Timeout: 5 * time.Minute, Async: true,
+			Timeout: 30 * time.Second,
 			Params: []operations.Param{
 				{Name: "root", Kind: operations.ParamString, Required: true, MaxLen: 32},
 				{Name: "id", Kind: operations.ParamString, Required: true, MaxLen: 64},
+				{Name: "to", Kind: operations.ParamString, MaxLen: 1024},
 			},
 		},
 
@@ -198,6 +228,12 @@ func Declarations() []operations.Operation {
 			},
 		},
 		{
+			ID: "album.configure", Summary: "Configure local album directories without modifying originals",
+			Scope: []string{"album"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall,
+			Timeout: 10 * time.Second, Idempotent: true, Mutex: operations.MutexAlbum,
+			Params: []operations.Param{{Name: "code", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "root", Kind: operations.ParamString, MaxLen: 64}, {Name: "path", Kind: operations.ParamString, MaxLen: 4096}, {Name: "name", Kind: operations.ParamString, MaxLen: 128}, {Name: "enabled", Kind: operations.ParamBool}, {Name: "allow_shared_volume", Kind: operations.ParamBool}, {Name: "remove", Kind: operations.ParamBool}},
+		},
+		{
 			ID: "album.scan", Summary: "Bounded directory and metadata scan",
 			Scope: []string{"collection"}, Class: domain.RiskBounded, Approval: domain.ApprovalPreauthorised,
 			Timeout: 2 * time.Hour, Async: true, Mutex: operations.MutexScan,
@@ -206,6 +242,7 @@ func Declarations() []operations.Operation {
 				{Name: "limit", Kind: operations.ParamInt, Required: true,
 					Doc: "maximum files this run may index; required, so a run cannot be unbounded"},
 				{Name: "dry_run", Kind: operations.ParamBool, Doc: "preview only"},
+				{Name: "max_runtime", Kind: operations.ParamString, MaxLen: 16},
 			},
 		},
 		{
@@ -221,7 +258,8 @@ func Declarations() []operations.Operation {
 		},
 		{
 			ID: "album.pause", Summary: "Pause album heavy work durably",
-			Scope: []string{"album"}, Class: domain.RiskBounded, Approval: domain.ApprovalPreauthorised,
+			StopsWork: true,
+			Scope:     []string{"album"}, Class: domain.RiskBounded, Approval: domain.ApprovalPreauthorised,
 			Timeout: 10 * time.Second, Idempotent: true,
 			Params: []operations.Param{
 				{Name: "reason", Kind: operations.ParamString, MaxLen: 200},
@@ -286,8 +324,8 @@ func Declarations() []operations.Operation {
 		},
 
 		// -----------------------------------------------------------------
-		// Backup: read-only status. The console never starts, stops or
-		// reconfigures the existing backup; it reports on it and yields to it.
+		// External backup status remains inspection-only. Native local backup
+		// operations above work on our own private, configured storage vaults.
 		// -----------------------------------------------------------------
 		{
 			ID: "backup.status", Summary: "Backup service state and recent activity",
@@ -300,9 +338,10 @@ func Declarations() []operations.Operation {
 			Timeout: 10 * time.Second, Idempotent: true, ReadOnly: true,
 		},
 		{
-			ID: "backup.verify", Summary: "Last verification result, if one is recorded",
-			Scope: []string{"backup"}, Class: domain.RiskRead, Approval: domain.ApprovalNone,
-			Timeout: 10 * time.Second, Idempotent: true, ReadOnly: true,
+			ID: "backup.verify", Summary: "Verify a bounded backup manifest and every payload file",
+			Scope: []string{"backup"}, Class: domain.RiskBounded, Approval: domain.ApprovalPerCall,
+			Timeout: 2 * time.Hour, Async: true, Mutex: operations.MutexBackup,
+			Params: []operations.Param{{Name: "root", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "id", Kind: operations.ParamString, Required: true, MaxLen: 32}},
 		},
 
 		// -----------------------------------------------------------------

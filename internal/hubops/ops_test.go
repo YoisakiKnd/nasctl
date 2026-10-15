@@ -2,6 +2,7 @@ package hubops
 
 import (
 	"testing"
+	"time"
 
 	"github.com/YoisakiKnd/nasctl/internal/domain"
 	"github.com/YoisakiKnd/nasctl/internal/operations"
@@ -62,9 +63,11 @@ func TestHeavyOperationsAreAsyncAndBounded(t *testing.T) {
 		}
 		switch op.ID {
 		case "album.pause", "album.resume", "jobs.cancel",
+			"anime.download.pause", "anime.download.resume", "anime.download.recheck",
 			"mode.set_watching", "mode.set_maintenance", "mode.clear":
 			// These are quick state changes with an explicit count or time
-			// bound of their own; they are not decoder work.
+			// bound of their own; downloader controls acknowledge one tagged
+			// action and never wait for qBittorrent's file hashing or download.
 			continue
 		}
 		if !op.Async {
@@ -110,6 +113,22 @@ func TestStorageOperationsNameTheirRoot(t *testing.T) {
 			// exist, so it is the one storage operation that cannot name one.
 			continue
 		}
+		if op.ID == "files.batch" {
+			// A batch binds all per-item root IDs and destination via its complete
+			// normalized selection digest. No machine path is accepted instead.
+			for _, name := range []string{"selection", "action", "count", "limit", "max_bytes"} {
+				found := false
+				for _, p := range op.Params {
+					if p.Name == name && p.Required {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("batch missing required %s", name)
+				}
+			}
+			continue
+		}
 		var hasRoot bool
 		for _, p := range op.Params {
 			if p.Name == "root" {
@@ -147,16 +166,26 @@ func TestMutatingFileOperationsDeclareTheirMutex(t *testing.T) {
 	}
 }
 
-// TestTheConsoleNeverStartsOrStopsTheBackup: the existing backup is not ours to
-// manage. Every backup operation must be a read.
-func TestTheConsoleNeverStartsOrStopsTheBackup(t *testing.T) {
+// External backup services remain inspection-only; native local copies are
+// explicit, bounded tasks and never expose command, unit or PID controls.
+func TestExternalBackupStatusRemainsReadOnlyAndNativeBackupIsBounded(t *testing.T) {
 	for _, op := range Declarations() {
 		if len(op.Scope) == 0 || op.Scope[0] != "backup" {
 			continue
 		}
-		if op.Class != domain.RiskRead {
-			t.Errorf("%s touches the backup but is classed %q; the console may read the "+
-				"backup's state, never change it", op.ID, op.Class)
+		if op.ID == "backup.status" || op.ID == "backup.plan" {
+			if op.Class != domain.RiskRead {
+				t.Errorf("external status %s became mutating", op.ID)
+			}
+			continue
+		}
+		if op.Mutex != operations.MutexBackup || op.Approval != domain.ApprovalPerCall || op.Timeout > 2*time.Hour {
+			t.Errorf("native backup operation lacks bounded admission: %+v", op)
+		}
+		for _, p := range op.Params {
+			if p.Name == "command" || p.Name == "unit" || p.Name == "pid" {
+				t.Errorf("native backup exposes external-service control: %s", op.ID)
+			}
 		}
 	}
 }

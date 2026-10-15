@@ -9,13 +9,14 @@
 # Produces:
 #   dist/albumctl-linux-armv7      static 32-bit ARM binary, GOARM=7
 #   dist/nasctl-linux-armv7        static 32-bit ARM binary, GOARM=7
-#   dist/*.sha256                  checksums
+#   dist/SHA256SUMS                checksums
 #   dist/deps.txt                  what the binaries need at runtime
 #   dist/README.txt                the exact commands and their output
 #
-# Requirements on the BUILD machine: Go 1.24 or newer. Nothing else. No cgo
-# toolchain, no cross-compiler, no Docker, and no Node/Python/PHP. The frontend
-# is embedded from internal/server/web and is committed as source.
+# Requirements on the BUILD machine: Go 1.27.1 or newer. Nothing else. No cgo
+# toolchain, no cross-compiler, no Docker, and no Node/Python/PHP for Go builds.
+# Generated Svelte assets are committed in internal/hubweb/web. To change the
+# UI, rebuild with npm in frontend before running this script.
 #
 # Reproducibility: this script sets a fixed build time, a fixed module
 # environment and a fixed target, so two runs from the same commit produce the
@@ -125,23 +126,24 @@ GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 GOFLAGS=-trimpath \
     echo "                   required only for the isolated heavy path; without it"
     echo "                   heavy tasks refuse to run unless an operator"
     echo "                   explicitly accepts RSS-only supervision."
-    echo "filesystems:       ext4 on the target. SQLite runs in WAL mode over"
-    echo "                   modernc.org/sqlite, a pure-Go amalgamation, so it also"
-    echo "                   runs on filesystems that cannot mmap (NFS, tmpfs)."
-    echo "external programs: none are required and none are executed by this"
-    echo "                   build. There is no ffmpeg, no ExifTool and no shell"
-    echo "                   call anywhere in the import graph of the web service."
+    echo "filesystems:       state requires reliable local SQLite WAL locking."
+    echo "                   Media and backup roots need separate validation on"
+    echo "                   their actual filesystem; NFS/SMB is not verified here."
+    echo "external programs: nasctl starts the matching albumctl binary on demand"
+    echo "                   for explicit album tasks; no separate album HTTP"
+    echo "                   service is needed. ffmpeg and ExifTool are not required."
     echo "                   Video posters are off and their adapter is not"
     echo "                   compiled in; a missing adapter skips a format rather"
     echo "                   than failing a library."
     echo "memory needed:     see docs/RESOURCE-REPORT.md. The ceilings the"
     echo "                   operator sets (systemd MemoryHigh/MemoryMax and the"
     echo "                   guard thresholds) are policy, not requirements of the"
-    echo "                   binary: the binary runs without them, less safely."
+    echo "                   binary. Required cgroup isolation still refuses heavy"
+    echo "                   tasks when unavailable; browsing remains available."
     echo
     echo "--- what this artefact has NOT been verified against ---"
-    echo "It has been run under qemu-arm-static on an x86_64 development host."
-    echo "It has NOT been run on the target onecloud. Memory numbers taken under"
+    echo "This build script does not run QEMU or execute either target binary."
+    echo "It has NOT verified the target onecloud. Memory numbers taken under"
     echo "emulation are not the target's numbers and must not be presented as"
     echo "measurements of it."
 } >"$OUT/deps.txt" 2>&1

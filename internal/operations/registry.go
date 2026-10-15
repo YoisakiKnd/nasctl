@@ -60,6 +60,7 @@ const (
 	MutexAlbum  MutexClass = "album"
 	MutexMedia  MutexClass = "media"
 	MutexBackup MutexClass = "backup"
+	MutexFiles  MutexClass = "files"
 )
 
 // Operation is one declarable action.
@@ -82,11 +83,26 @@ type Operation struct {
 	// ReadOnly marks operations that change nothing at all, here or elsewhere.
 	// It is the property the default-deny policy for agents keys off.
 	ReadOnly bool `json:"read_only"`
+	// StopsWork permits a bounded stop/pause command during a paused mode. It
+	// never bypasses identity, read-only, approval, mutex or job-cap checks.
+	StopsWork bool `json:"stops_work,omitempty"`
+	// MetadataOnly is limited to fixed, synchronous account/settings updates.
+	// It permits maintenance while heavy work is paused; other gates remain.
+	MetadataOnly bool `json:"metadata_only,omitempty"`
 }
 
 // Validate checks the declaration itself. A malformed operation is a programming
 // error and is caught at startup, not at call time.
 func (o Operation) Validate() error {
+	if o.MetadataOnly {
+		allowed := o.ID == "settings.configure" || o.ID == "users.configure" || o.ID == "users.password"
+		if !allowed || o.Async || o.ReadOnly || o.Class != domain.RiskMutating || o.Timeout > 15*time.Second {
+			return fmt.Errorf("operation %s: metadata_only requires an allowlisted synchronous bounded settings/account mutation", o.ID)
+		}
+	}
+	if o.StopsWork && (o.ReadOnly || o.Async || o.Class != domain.RiskBounded || !strings.HasSuffix(o.ID, ".pause")) {
+		return fmt.Errorf("operation %s: stops_work requires a synchronous bounded pause operation", o.ID)
+	}
 	if o.ID == "" {
 		return fmt.Errorf("operation has no ID")
 	}

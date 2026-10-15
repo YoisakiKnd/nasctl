@@ -1,5 +1,11 @@
 # OneCloud Hub — stage B evidence
 
+Historical evidence: later functionality, account handling and the combined
+NAS/album-worker unit differ from this snapshot. Current deployment budgets and
+procedures are in [DEPLOYMENT.md](DEPLOYMENT.md); completion evidence is tracked
+in [COMPLETION-PLAN.md](COMPLETION-PLAN.md). The measurements below are preserved
+as measurements of that earlier build, not claims about the current runtime.
+
 This document records what was built in stage B, what was measured, and what was
 **not** verified. It exists because the difference between those three categories
 is the whole point of the project: an unmeasured claim about a 981 MiB machine is

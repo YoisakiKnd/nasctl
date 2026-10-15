@@ -1,0 +1,23 @@
+{
+  "date": "2026-10-15",
+  "compiler": "go1.27.2 darwin/arm64",
+  "CGO_ENABLED": 0,
+  "static_binaries": true,
+  "sha256": {
+    "amd64": {
+      "nasctl": "82414afdd6cdb61a27d9b2ac563e1762c753bfb07c91c367c58277645137d366",
+      "albumctl": "ad10c40c7db9eace57e042eb8862b9c5d112ecb9bbdcaa105aa75c16f5e151b4"
+    },
+    "arm64": {
+      "nasctl": "b76fe79ecf5d847c43cc253ee4b4fd7f2e713e5f506eaa6741ae9c492d51a7d0",
+      "albumctl": "1fc2b501e9ce01ec183319f59eb8290f3aa9c5bf3ab0b7e1b260e9425411c618"
+    },
+    "armv7": {
+      "nasctl": "b89610b8d9322c51515e6b7c7b1d5991081f9848a7ac556130ddc2d8dddaa1fe",
+      "albumctl": "7ebb2028d731a470fb80bd71251682d5b441ae93792b303a97d5b3f54e4361db"
+    }
+  },
+  "armv7_reproducible": true,
+  "armv7_source_date_epoch": 1792022400,
+  "runtime_on_real_nas_verified": false
+}

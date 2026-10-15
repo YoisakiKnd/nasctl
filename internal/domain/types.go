@@ -294,8 +294,10 @@ func (k PrincipalKind) Valid() bool {
 
 // Principal is an authenticated caller.
 type Principal struct {
-	Kind PrincipalKind `json:"kind"`
-	Name string        `json:"name"`
+	Kind   PrincipalKind `json:"kind"`
+	Name   string        `json:"name"`
+	UserID string        `json:"user_id,omitempty"`
+	Role   string        `json:"role,omitempty"`
 }
 
 // String renders the principal in the form used in job and audit rows, so that
@@ -303,6 +305,9 @@ type Principal struct {
 func (p Principal) String() string {
 	if p.Name == "" {
 		return string(p.Kind)
+	}
+	if p.Kind == PrincipalUser && p.UserID != "" {
+		return string(p.Kind) + ":" + p.Name + "#" + p.UserID
 	}
 	return string(p.Kind) + ":" + p.Name
 }

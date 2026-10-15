@@ -2,11 +2,10 @@
 // tokens, one navigation, and one HTTP API that every part of the UI is built
 // from.
 //
-// It is read-only by construction in this stage. The API exposes reads and the
-// mode/approval controls an operator needs to govern the console; it starts no
-// scan, decodes no image and launches no external program inside a request. Those
-// are operations, and operations go through the job layer where they are
-// admitted, bounded, audited and - for anything heavy - run outside this process.
+// File management is read-only unless a root explicitly enables operator writes.
+// Native anime work is explicit, bounded
+// and tracked through the job layer. Requests never start a scan, decode images
+// or launch external programs; qBittorrent performs downloads independently.
 //
 // The boundary is enforced by the package's import graph and checked by a test:
 // nothing here imports a decoder, the scanner or the thumbnail generator. That is
@@ -29,12 +28,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/YoisakiKnd/nasctl/internal/accounts"
+	"github.com/YoisakiKnd/nasctl/internal/album"
+	"github.com/YoisakiKnd/nasctl/internal/anime"
+	"github.com/YoisakiKnd/nasctl/internal/backups"
 	"github.com/YoisakiKnd/nasctl/internal/buildinfo"
 	"github.com/YoisakiKnd/nasctl/internal/domain"
 	"github.com/YoisakiKnd/nasctl/internal/files"
 	"github.com/YoisakiKnd/nasctl/internal/hubstore"
 	"github.com/YoisakiKnd/nasctl/internal/jobs"
 	"github.com/YoisakiKnd/nasctl/internal/operations"
+	"github.com/YoisakiKnd/nasctl/internal/settings"
 	"github.com/YoisakiKnd/nasctl/internal/suzu"
 )
 
@@ -45,7 +49,8 @@ type Config struct {
 	// Token, when set, is required as a bearer token or cookie. Empty means the
 	// bind address is the only access control, which is why CheckBind refuses a
 	// public address.
-	Token string
+	Token        string
+	RequireSetup bool
 	// Agents maps a credential to the agent it identifies. This is what makes the
 	// AI distinction enforceable: the credential decides the principal, so an
 	// agent cannot escape its restrictions by not announcing itself.
@@ -95,12 +100,23 @@ func DefaultConfig() Config {
 
 // Server is the console's HTTP service.
 type Server struct {
-	Cfg     Config
-	Files   *files.Manager
-	Jobs    *jobs.Manager
-	Suzu    *suzu.Client
-	Log     *slog.Logger
-	Version string
+	Cfg          Config
+	Files        *files.Manager
+	Jobs         *jobs.Manager
+	Suzu         *suzu.Client
+	Log          *slog.Logger
+	Version      string
+	Anime        *anime.Engine
+	Album        *album.Client
+	AlbumControl album.Control
+	Backups      backups.Control
+	Settings     settings.Control
+	Accounts     accounts.Control
+	WorkContext  context.Context
+	work         sync.WaitGroup
+	workMu       sync.Mutex
+	workStopping bool
+	activeWork   map[string]context.CancelFunc
 
 	// requestSlots bounds concurrent requests; streamSlots bounds concurrent
 	// file transfers. Two limits rather than one, because a slow download must
@@ -110,7 +126,8 @@ type Server struct {
 
 	// previews caches small derived facts (not file contents) to avoid
 	// re-stat'ing on every thumbnail request.
-	mu sync.Mutex
+	mu   sync.Mutex
+	auth browserAuth
 }
 
 // New builds the server.
@@ -176,6 +193,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /", s.handleIndex)
 	mux.HandleFunc("GET /app.css", s.handleStatic)
 	mux.HandleFunc("GET /app.js", s.handleStatic)
+	mux.HandleFunc("GET /api/v1/auth/status", s.handleAuthStatus)
+	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
+	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
+	mux.HandleFunc("POST /api/v1/auth/setup", s.handleAccountSetup)
+	mux.HandleFunc("POST /api/v1/auth/password", s.handlePassword)
+	mux.HandleFunc("GET /api/v1/users", s.handleUsers)
+	mux.HandleFunc("POST /api/v1/users", s.handleUsers)
+	mux.HandleFunc("DELETE /api/v1/users/{id}", s.handleUsers)
 
 	// API: reads.
 	mux.HandleFunc("GET /api/v1/overview", s.handleOverview)
@@ -183,6 +208,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/audit", s.handleAudit)
 	mux.HandleFunc("GET /api/v1/modes", s.handleModes)
 	mux.HandleFunc("GET /api/v1/approvals", s.handleApprovals)
+	mux.HandleFunc("GET /api/v1/settings", s.handleSettings)
+	mux.HandleFunc("POST /api/v1/settings/validate", s.handleSettings)
+	mux.HandleFunc("POST /api/v1/settings", s.handleSettings)
 
 	mux.HandleFunc("GET /api/v1/files/roots", s.handleRoots)
 	mux.HandleFunc("GET /api/v1/files/list", s.handleFileList)
@@ -191,14 +219,72 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/files/preview", s.handleFilePreview)
 	mux.HandleFunc("GET /api/v1/files/download", s.handleFileDownload)
 	mux.HandleFunc("HEAD /api/v1/files/download", s.handleFileDownload)
+	mux.HandleFunc("POST /api/v1/files/mkdir", s.handleFileMutation)
+	mux.HandleFunc("POST /api/v1/files/rename", s.handleFileMutation)
+	mux.HandleFunc("POST /api/v1/files/trash", s.handleFileMutation)
+	mux.HandleFunc("POST /api/v1/files/restore", s.handleFileMutation)
+	mux.HandleFunc("GET /api/v1/files/trash", s.handleFileTrashList)
+	mux.HandleFunc("PUT /api/v1/files/upload", s.handleFileUpload)
+	mux.HandleFunc("POST /api/v1/files/copy", s.handleFileBackground)
+	mux.HandleFunc("POST /api/v1/files/move", s.handleFileBackground)
+	mux.HandleFunc("POST /api/v1/files/purge", s.handleFileBackground)
+	mux.HandleFunc("POST /api/v1/files/batch", s.handleFileBatch)
+	mux.HandleFunc("GET /api/v1/backup/settings", s.handleBackupSettings)
+	mux.HandleFunc("POST /api/v1/backup/plans", s.handleBackupPlan)
+	mux.HandleFunc("DELETE /api/v1/backup/plans/{id}", s.handleBackupPlan)
+	mux.HandleFunc("GET /api/v1/backup/history", s.handleBackupHistory)
+	mux.HandleFunc("POST /api/v1/backup/run", s.handleBackupWork)
+	mux.HandleFunc("POST /api/v1/backup/verify", s.handleBackupWork)
+	mux.HandleFunc("POST /api/v1/backup/restore", s.handleBackupWork)
+	mux.HandleFunc("POST /api/v1/backup/delete", s.handleBackupWork)
+	mux.HandleFunc("POST /api/v1/backup/cleanup", s.handleBackupWork)
+	mux.HandleFunc("POST /api/v1/jobs/{id}/cancel", s.handleCancelWork)
 
 	mux.HandleFunc("GET /api/v1/jobs", s.handleJobs)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleJob)
 
 	mux.HandleFunc("GET /api/v1/media/status", s.handleMediaStatus)
+	mux.HandleFunc("GET /api/v1/album/status", s.handleAlbumStatus)
+	mux.HandleFunc("GET /api/v1/album/settings", s.handleAlbumSettings)
+	mux.HandleFunc("POST /api/v1/album/directories", s.handleAlbumDirectory)
+	mux.HandleFunc("DELETE /api/v1/album/directories/{code}", s.handleAlbumDirectory)
+	mux.HandleFunc("POST /api/v1/album/tasks/{operation}", s.handleAlbumTask)
+	mux.HandleFunc("GET /api/v1/album/collections", s.handleAlbumCollections)
+	mux.HandleFunc("GET /api/v1/album/media", s.handleAlbumList)
+	mux.HandleFunc("GET /api/v1/album/media/{id}", s.handleAlbumDetails)
+	mux.HandleFunc("GET /api/v1/album/media/{id}/{part}", s.handleAlbumStream)
+	mux.HandleFunc("GET /api/v1/anime/status", s.handleAnimeStatus)
+	mux.HandleFunc("GET /api/v1/anime/settings", s.handleAnimeSettings)
+	mux.HandleFunc("GET /api/v1/anime/history/export", s.handleAnimeHistoryExport)
+	mux.HandleFunc("GET /api/v1/anime/subscriptions/{id}/history", s.handleAnimeHistoryStatus)
+	mux.HandleFunc("POST /api/v1/anime/subscriptions/{id}/history/cleanup", s.handleAnimeHistoryCleanup)
+	mux.HandleFunc("POST /api/v1/anime/subscriptions/{id}/metadata", s.handleAnimeMetadataRefresh)
+	mux.HandleFunc("GET /api/v1/anime/metadata/backups", s.handleAnimeMetadataBackups)
+	mux.HandleFunc("GET /api/v1/anime/metadata/backups/{id}/download", s.handleAnimeMetadataBackupExport)
+	mux.HandleFunc("POST /api/v1/anime/metadata/backups/{id}/restore", s.handleAnimeMetadataRestore)
+	mux.HandleFunc("DELETE /api/v1/anime/metadata/backups/{id}", s.handleAnimeMetadataBackupDelete)
+	mux.HandleFunc("POST /api/v1/anime/preview", s.handleAnimePreview)
+	mux.HandleFunc("POST /api/v1/anime/connection", s.handleAnimeConnection)
+	mux.HandleFunc("POST /api/v1/anime/sync", s.handleAnimeSync)
+	mux.HandleFunc("POST /api/v1/anime/episodes/{id}/ignore", s.handleAnimeIgnore)
+	mux.HandleFunc("POST /api/v1/anime/episodes/{id}/download", s.handleAnimeDownloadControl)
+	mux.HandleFunc("GET /api/v1/anime/subscriptions", s.handleAnimeSubscriptions)
+	mux.HandleFunc("POST /api/v1/anime/subscriptions", s.handleSaveAnimeSubscription)
+	mux.HandleFunc("PUT /api/v1/anime/subscriptions/{id}", s.handleSaveAnimeSubscription)
+	mux.HandleFunc("POST /api/v1/anime/subscriptions/{id}/enabled", s.handleAnimeSubscriptionState)
+	mux.HandleFunc("POST /api/v1/anime/subscriptions/{id}/archive", s.handleAnimeSubscriptionState)
+	mux.HandleFunc("GET /api/v1/anime/metadata/search", s.handleAnimeMetadataSearch)
+	mux.HandleFunc("GET /api/v1/anime/metadata/series/{id}", s.handleAnimeMetadataDetails)
+	mux.HandleFunc("GET /api/v1/anime/episodes", s.handleAnimeEpisodes)
+	mux.HandleFunc("POST /api/v1/anime/refresh", s.handleAnimeRefresh)
+	mux.HandleFunc("POST /api/v1/anime/episodes/{id}/queue", s.handleAnimeQueue)
+	mux.HandleFunc("GET /api/v1/anime/episodes/{id}/video", s.handleAnimeVideo)
+	mux.HandleFunc("GET /api/v1/anime/subscriptions/{id}/poster", s.handleAnimePoster)
+	mux.HandleFunc("GET /api/v1/anime/episodes/{id}/playback", s.handleAnimePlayback)
+	mux.HandleFunc("PUT /api/v1/anime/episodes/{id}/playback", s.handleSaveAnimePlayback)
+	mux.HandleFunc("GET /api/v1/anime/episodes/{id}/subtitles/{name}", s.handleAnimeSubtitle)
 
-	// API: the governance controls. These are the only writes in this stage, and
-	// they change the console's own state - never a file, never the machine.
+	// API: governance controls change the console's modes and approvals.
 	mux.HandleFunc("POST /api/v1/modes", s.handleSetMode)
 	mux.HandleFunc("DELETE /api/v1/modes/{mode}", s.handleClearMode)
 
@@ -225,14 +311,27 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		// Authorisation resolves the credential to a principal. With no token and
 		// no agents configured, the bind address is the only control - which is
 		// why CheckBind refuses a public address.
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		p, ok := s.authenticate(r)
-		if !ok {
+		if !ok && !publicRoute(r) {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="nasctl"`)
 			writeError(w, http.StatusUnauthorized, "unauthorised",
-				"this console requires a token")
+				"this console requires authentication; sign in or complete local administrator setup")
 			return
 		}
 		r = r.WithContext(withPrincipal(r.Context(), p))
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
+			if origin := r.Header.Get("Origin"); origin != "" && origin != "http://"+r.Host && origin != "https://"+r.Host {
+				writeError(w, http.StatusForbidden, "cross_origin", "cross-origin writes are refused")
+				return
+			}
+			if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+				writeError(w, http.StatusForbidden, "cross_origin", "cross-site writes are refused")
+				return
+			}
+		}
 
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -251,6 +350,11 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		case s.requestSlots <- struct{}{}:
 			defer func() { <-s.requestSlots }()
 		case <-r.Context().Done():
+			return
+		}
+		if !roleRouteAllowed(p, r) {
+			s.roleDenied(r)
+			writeError(w, 403, "role_denied", "此账号角色无权执行该操作")
 			return
 		}
 
@@ -290,8 +394,12 @@ func (s *Server) presentedToken(r *http.Request) string {
 // access control, and that is stated rather than implied.
 func (s *Server) authenticate(r *http.Request) (domain.Principal, bool) {
 	tok := s.presentedToken(r)
+	state, err := s.accountStatus(r.Context())
+	if err != nil {
+		return domain.Principal{}, false
+	}
 
-	if len(s.Cfg.Agents) > 0 || s.Cfg.Token != "" {
+	if len(s.Cfg.Agents) > 0 || s.Cfg.Token != "" || state.Enabled || s.Cfg.RequireSetup {
 		// A credential is required. Check the agents first so that an agent token
 		// can never be mistaken for the operator's.
 		for _, a := range s.Cfg.Agents {
@@ -301,6 +409,11 @@ func (s *Server) authenticate(r *http.Request) (domain.Principal, bool) {
 		}
 		if s.Cfg.Token != "" && subtleEqual(tok, s.Cfg.Token) {
 			return domain.Principal{Kind: domain.PrincipalUser, Name: "operator"}, true
+		}
+		// An explicitly supplied invalid credential must not fall back to a
+		// different browser identity. Cookie sessions are operator-only.
+		if tok == "" && r.Header.Get("Authorization") == "" {
+			return s.browserPrincipal(r)
 		}
 		return domain.Principal{}, false
 	}
@@ -625,6 +738,8 @@ type statusWriter struct {
 	wrote bool
 }
 
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func (w *statusWriter) WriteHeader(code int) {
 	if !w.wrote {
 		w.code = code
@@ -668,22 +783,23 @@ func contextWithTimeout(parent context.Context, d time.Duration) (context.Contex
 
 // jobSummary is the shape the UI consumes for one job.
 type jobSummary struct {
-	ID         string          `json:"id"`
-	Op         string          `json:"op"`
-	State      domain.JobState `json:"state"`
-	Principal  string          `json:"principal"`
-	Target     string          `json:"target,omitempty"`
-	Params     string          `json:"params,omitempty"`
-	CreatedAt  time.Time       `json:"created_at"`
-	StartedAt  *time.Time      `json:"started_at,omitempty"`
-	EndedAt    *time.Time      `json:"ended_at,omitempty"`
-	Progress   int64           `json:"progress"`
-	Total      int64           `json:"total"`
-	Unit       string          `json:"unit,omitempty"`
-	StopReason string          `json:"stop_reason,omitempty"`
-	Error      string          `json:"error,omitempty"`
-	Verified   bool            `json:"verified"`
-	Attention  bool            `json:"needs_attention"`
+	ID          string          `json:"id"`
+	Op          string          `json:"op"`
+	State       domain.JobState `json:"state"`
+	Principal   string          `json:"principal"`
+	Target      string          `json:"target,omitempty"`
+	Params      string          `json:"params,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
+	StartedAt   *time.Time      `json:"started_at,omitempty"`
+	EndedAt     *time.Time      `json:"ended_at,omitempty"`
+	Progress    int64           `json:"progress"`
+	Total       int64           `json:"total"`
+	Unit        string          `json:"unit,omitempty"`
+	StopReason  string          `json:"stop_reason,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	Verified    bool            `json:"verified"`
+	Attention   bool            `json:"needs_attention"`
+	Cancellable bool            `json:"cancellable"`
 }
 
 // toJobSummary renders a job for the UI, making explicit which states need

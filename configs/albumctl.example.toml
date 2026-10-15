@@ -216,6 +216,26 @@ require_known = false
 
 [hub]
 
+# Uncomment before adding users to require private first-admin setup even when
+# the state volume is lost. New nasctl init configurations already enable it.
+# See docs/AUTH.md. This shared album template retains the legacy default.
+# setup = true
+
+# Local album reading is enabled by default, using paths.index_file and collections.
+# Install albumctl beside nasctl for explicitly requested bounded processing.
+# [hub.album]
+# mode = "local"
+# worker_binary = "/usr/local/bin/albumctl" # optional absolute processing path
+# Use mode = "disabled" to disable the album entirely.
+# Optional compatibility connection to a separate read-only album HTTP service:
+# No port or token is inferred. Use a literal private/loopback IP or localhost.
+# This credential belongs to albumctl; it is not the nasctl operator credential.
+# See docs/ALBUM.md. An explicit api_base selects remote mode automatically.
+# [hub.album]
+# api_base = "http://127.0.0.1:8088"
+# token = "replace-with-the-album-service-token"
+# public_url = "http://127.0.0.1:8088" # optional browser link, not needed to browse
+
 # Directories the file manager may browse. Each is addressed by its ID in every
 # request and in every API call - never by a path - so a request cannot name a
 # directory that is not listed here.
@@ -241,11 +261,9 @@ require_known = false
 # label = "Downloads"
 # path = "/mnt/data/downloads"
 
-# File writes (upload, mkdir, rename, move, copy, trash) are not implemented in
-# this build. `writable = true` is refused by the configuration validator rather
-# than accepted and ignored, so this key cannot promise a capability the binary
-# does not have. It is documented here so that a configuration written for a
-# later version produces a clear message instead of a typo report.
+# Explicitly enable operator upload/mkdir/rename/trash/restore for this root.
+# Defaults off. Writable roots cannot overlap state/cache or other storage roots.
+# See docs/FILES.md for bounds, confirmation and filesystem requirements.
 # writable = false
 
 # AI principals with their own credentials.
@@ -270,6 +288,23 @@ require_known = false
 # name = "hermes"
 # token = "replace-with-a-long-random-string"
 # allow_heavy = false
+
+[hub.files]
+# Local upper bounds. Requests may lower them; changes take effect after restart.
+# Zero selects the default; negative or above-hard-cap values are rejected.
+max_entries = 20000
+max_page_size = 200
+default_page_size = 50
+search_max_results = 200
+search_max_examined = 20000
+preview_max_bytes = 33554432
+upload_max_bytes = 8589934592
+# Byte budgets default to 8 GiB; an operator may raise upload/copy to 1 TiB.
+# Time, entry, depth and fixed streaming-buffer limits still apply independently.
+trash_max_entries = 1000
+copy_max_entries = 10000
+copy_max_bytes = 8589934592
+batch_max_items = 100
 
 [hub.jobs]
 # The console's own job records. Both bounds exist so that a machine that is
@@ -296,6 +331,28 @@ audit_retention_days = 90
 # api_base = "http://127.0.0.1:8637"
 # token = ""
 # library_root = ""
+
+[hub.anime]
+# Native AutoBangumi-style pipeline. Independent of the optional legacy suzu DB.
+# Enable only after the directories exist and qBittorrent can see the same paths.
+enabled = false
+# Automatic polling is optional: RSS uses the interval below, and pending
+# downloads are reconciled independently every 60 seconds. Manual refresh/sync
+# and connection checks remain available from the web UI.
+auto_poll = false
+poll_interval_seconds = 900
+max_items_per_feed = 200
+qbittorrent_url = "http://127.0.0.1:8080"
+username = ""
+password = ""
+# Example: /mnt/data/downloads/anime and /mnt/data/library/anime.
+download_dir = ""
+# Optional different POSIX path visible inside a qBittorrent container.
+# qbittorrent_download_dir = "/downloads/anime"
+library_dir = ""
+# Optional TMDB API read-access bearer token, not the v3 API key. Each subscription
+# can specify a TV series ID to fetch tvshow.nfo + poster.jpg without guessing.
+tmdb_token = ""
 
 # Every collection is a directory that already exists and is mounted read-only
 # for this application's purposes. Nothing here is written to.

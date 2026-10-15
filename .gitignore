@@ -10,8 +10,7 @@
 /coverage.html
 
 # The UI harness's dependencies. Nothing in scripts/uitest runs on the NAS: the
-# console's frontend is plain JavaScript embedded in the binary, with no build
-# step and no runtime dependency. Both forms are listed because a trailing-slash
+# console embeds the generated Svelte assets and has no Node runtime dependency. Both forms are listed because a trailing-slash
 # pattern matches a directory but not a symlink.
 /scripts/uitest/node_modules
 /scripts/uitest/node_modules/
@@ -33,3 +32,10 @@ config.toml
 # Local state, in case anyone runs the tools from the checkout.
 /state/
 /cache/
+
+# Svelte build dependencies and local Vite cache. Production assets are tracked.
+/frontend/node_modules/
+/frontend/.svelte-kit/
+/frontend/.vite/
+
+/frontend/dist/

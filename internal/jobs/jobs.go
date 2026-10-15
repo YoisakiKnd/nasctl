@@ -53,6 +53,7 @@ const (
 	GateBackup   Gate = "backup"
 	GateJobCap   Gate = "job_cap"
 	GateReadOnly Gate = "read_only_console"
+	GateRole     Gate = "role"
 )
 
 // Decision is the outcome of an admission check.
@@ -197,6 +198,9 @@ func (m *Manager) Admit(ctx context.Context, p domain.Principal, op operations.O
 	if err := op.Check(args); err != nil {
 		return deny(GateApproval, err.Error())
 	}
+	if !p.RoleAllowsOperation(op.ID, op.ReadOnly) {
+		return deny(GateRole, "this user role does not permit the requested operation")
+	}
 
 	// 3. A read-only console refuses everything that changes state, before any
 	//    other consideration. This is what makes "inspection only" a property
@@ -216,7 +220,7 @@ func (m *Manager) Admit(ctx context.Context, p domain.Principal, op operations.O
 	if err != nil {
 		return deny(GateMode, "the current mode could not be read: "+err.Error())
 	}
-	if !mode.AllowsHeavyWork() {
+	if !mode.AllowsHeavyWork() && !op.StopsWork && !op.MetadataOnly {
 		return deny(GateMode, fmt.Sprintf("mode %q is in force (%s), which does not permit "+
 			"heavy work", mode.Mode, mode.Source))
 	}
@@ -324,6 +328,9 @@ func (m *Manager) Reconcile(ctx context.Context, alive func(pid, pgid int) bool)
 
 // StartMode sets a mode.
 func (m *Manager) StartMode(ctx context.Context, st domain.ModeState, by domain.Principal) error {
+	if !by.DeviceAdmin() {
+		return fmt.Errorf("%w: device modes require an administrator", ErrDenied)
+	}
 	if !st.Mode.Valid() {
 		return fmt.Errorf("jobs: %q is not a mode", st.Mode)
 	}
@@ -356,6 +363,9 @@ func (m *Manager) StartMode(ctx context.Context, st domain.ModeState, by domain.
 // way; resource_guard is cleared by the guard when its cause is resolved, so
 // that an operator cannot clear a safety state and immediately restart decoders.
 func (m *Manager) ClearMode(ctx context.Context, mode domain.Mode, by domain.Principal) error {
+	if !by.DeviceAdmin() {
+		return fmt.Errorf("%w: device modes require an administrator", ErrDenied)
+	}
 	if mode == domain.ModeResourceGuard {
 		return fmt.Errorf("jobs: resource_guard is set by the machine and is not cleared by " +
 			"hand; it clears when the resource cause is resolved")

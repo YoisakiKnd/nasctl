@@ -183,7 +183,10 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (*Report, error) {
 	}
 	cap := resource.ProbeCapability(sampler, cm)
 	rep.Capability = cap
-	if problems := cap.CapabilityProblems(r.Cfg.Guard.RequireCgroupIsolation && !opts.AllowNoCgroup); len(problems) > 0 {
+	// Observation is read-only; a newly created manager cannot already be
+	// isolated. Require usable signals here, then establish and verify the
+	// actual cgroup before admitting any decoder below.
+	if problems := cap.CapabilityProblems(false); len(problems) > 0 {
 		rep.StopReason = "isolation_unavailable"
 		rep.StopDetail = strings.Join(problems, "; ")
 		return rep, errors.New(rep.StopDetail)
@@ -213,6 +216,16 @@ func (r *Runner) Run(ctx context.Context, opts RunOptions) (*Report, error) {
 		}
 	} else {
 		rep.CgroupReason = "cgroup isolation disabled by configuration"
+	}
+	if cm != nil && cm.Active {
+		sampler = resource.NewSampler("/proc", cm.WorkDir)
+	}
+	cap = resource.ProbeCapability(sampler, cm)
+	rep.Capability = cap
+	if problems := cap.CapabilityProblems(r.Cfg.Guard.RequireCgroupIsolation && !opts.AllowNoCgroup); len(problems) > 0 {
+		rep.StopReason = "isolation_unavailable"
+		rep.StopDetail = strings.Join(problems, "; ")
+		return rep, errors.New(rep.StopDetail)
 	}
 
 	if isolated := cm != nil && cm.Active; isolated {

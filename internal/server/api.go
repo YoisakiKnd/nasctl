@@ -154,6 +154,18 @@ func (s *Server) parseListQuery(r *http.Request) (store.Filter, store.Cursor, in
 	q := r.URL.Query()
 	var f store.Filter
 	var cur store.Cursor
+	// Removed directories keep their derived rows for later reattachment, but
+	// must disappear from current listings/counts and cannot be read by ID.
+	f.CollectionIDs = []int64{}
+	configured, err := s.Store.Collections(r.Context())
+	if err != nil {
+		return f, cur, 0, err
+	}
+	for _, col := range configured {
+		if _, ok := s.Cfg.Collection(col.Code); ok {
+			f.CollectionIDs = append(f.CollectionIDs, col.ID)
+		}
+	}
 
 	limit := s.Cfg.Server.PageDefault
 	if v := q.Get("limit"); v != "" {
@@ -335,7 +347,8 @@ func (s *Server) handleMediaItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m, err := s.Store.GetMedia(ctx, id)
-	if errors.Is(err, store.ErrNotFound) {
+	_, configured := s.Cfg.Collection(m.CollectionCode)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !configured) {
 		writeError(w, http.StatusNotFound, "not_found", "no media with that id")
 		return
 	}
@@ -460,7 +473,8 @@ func (s *Server) handleThumb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m, err := s.Store.GetMedia(ctx, id)
-	if errors.Is(err, store.ErrNotFound) {
+	_, configured := s.Cfg.Collection(m.CollectionCode)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !configured) {
 		writeError(w, http.StatusNotFound, "not_found", "no media with that id")
 		return
 	}
@@ -549,15 +563,23 @@ func (s *Server) handleStream(attachment bool) http.HandlerFunc {
 			return
 		}
 
-		path, err := s.resolveOriginal(ctx, m)
-		if err != nil {
+		var f *os.File
+		if s.OpenOriginal != nil {
+			f, err = s.OpenOriginal(ctx, m)
+		} else {
+			var path string
+			path, err = s.resolveOriginal(ctx, m)
+			if err == nil {
+				f, err = os.Open(path)
+			}
+		}
+		if err != nil && !os.IsNotExist(err) {
 			// A path that escapes its root is a refusal, not a server error:
 			// nothing here is allowed to serve a file from outside a configured
 			// collection.
 			writeError(w, http.StatusForbidden, "path_refused", err.Error())
 			return
 		}
-		f, err := os.Open(path)
 		if err != nil {
 			if os.IsNotExist(err) {
 				writeError(w, http.StatusNotFound, "file_missing",

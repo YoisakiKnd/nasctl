@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/YoisakiKnd/nasctl/internal/config"
 	"github.com/YoisakiKnd/nasctl/internal/domain"
 	"github.com/YoisakiKnd/nasctl/internal/files"
 	"github.com/YoisakiKnd/nasctl/internal/hubstore"
@@ -114,11 +115,16 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 			out.Mode.Mode, out.Mode.Source, reasonSuffix(out.Mode.Reason)))
 	}
 
-	counts, err := s.Jobs.Store().CountByState(ctx)
+	p := principalOf(r.Context())
+	owner := ""
+	if p.Kind == domain.PrincipalUser && !p.DeviceAdmin() {
+		owner = p.String()
+	}
+	counts, err := s.Jobs.Store().CountByOwner(ctx, owner)
 	if err == nil {
 		out.Counts = counts
 	}
-	jobs, err := s.Jobs.Store().Jobs(ctx, hubstore.JobFilter{Open: true, Limit: 200})
+	jobs, err := s.Jobs.Store().Jobs(ctx, hubstore.JobFilter{Open: true, Limit: 200, Principal: owner})
 	if err != nil {
 		s.fail(w, http.StatusInternalServerError, "state_error", err)
 		return
@@ -134,7 +140,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	out.Files = s.rootsInfo()
+	out.Files = s.rootsFor(r)
 
 	// The resource view is best-effort: a console that cannot read /proc is
 	// still a console, but it must say so rather than showing zeros as if the
@@ -177,7 +183,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 			"cannot be reported"
 	}
 
-	out.ReadOnly = s.Jobs.ReadOnlyConsole()
+	out.ReadOnly = s.Jobs.ReadOnlyConsole() || principalOf(r.Context()).ReadOnlyUser()
 	out.AllowAIHeavy = s.Jobs.AllowAIHeavy()
 	out.Locks = lockNames(s.Jobs.HeldLocks())
 
@@ -234,6 +240,7 @@ func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
 		Async      bool       `json:"async"`
 		Mutex      string     `json:"mutex,omitempty"`
 		ReadOnly   bool       `json:"read_only"`
+		StopsWork  bool       `json:"stops_work,omitempty"`
 		Params     []paramDoc `json:"params,omitempty"`
 	}
 	var out []opDoc
@@ -243,6 +250,7 @@ func (s *Server) handleOps(w http.ResponseWriter, r *http.Request) {
 			Class: string(op.Class), Approval: string(op.Approval),
 			Timeout: op.Timeout.String(), Idempotent: op.Idempotent,
 			Async: op.Async, Mutex: string(op.Mutex), ReadOnly: op.ReadOnly,
+			StopsWork: op.StopsWork,
 		}
 		for _, p := range op.Params {
 			d.Params = append(d.Params, paramDoc{
@@ -412,41 +420,55 @@ func (s *Server) handleApprovals(w http.ResponseWriter, r *http.Request) {
 
 // rootDoc is one storage root as the UI sees it.
 type rootDoc struct {
-	ID           string `json:"id"`
-	Label        string `json:"label"`
-	Path         string `json:"path"`
-	ExposeHidden bool   `json:"expose_hidden"`
-	Available    bool   `json:"available"`
-	Note         string `json:"note,omitempty"`
+	ID            string          `json:"id"`
+	Label         string          `json:"label"`
+	Path          string          `json:"path"`
+	ExposeHidden  bool            `json:"expose_hidden"`
+	Available     bool            `json:"available"`
+	Writable      bool            `json:"writable"`
+	Note          string          `json:"note,omitempty"`
+	Capacity      *files.Capacity `json:"capacity,omitempty"`
+	CapacityError string          `json:"capacity_error,omitempty"`
 }
 
 type rootsResponse struct {
 	Roots []rootDoc `json:"roots"`
-	// Writable reports whether file writes exist in this build. It is false, and
-	// the UI hides write controls based on it rather than showing buttons that
-	// always fail.
-	Writable bool   `json:"writable"`
-	Note     string `json:"note,omitempty"`
+	// Writable reports whether any available root permits operator writes under
+	// the console's global readonly setting. Each root also reports its own flag.
+	Writable       bool              `json:"writable"`
+	Note           string            `json:"note,omitempty"`
+	Capabilities   []string          `json:"capabilities"`
+	UploadMaxBytes int64             `json:"upload_max_bytes"`
+	Limits         config.FileLimits `json:"limits"`
 }
 
 // rootsInfo builds the roots response.
 func (s *Server) rootsInfo() rootsResponse {
 	out := rootsResponse{
-		Roots:    []rootDoc{},
-		Writable: false,
-		Note: "file writes (upload, create, rename, move, copy, trash) are not " +
-			"implemented in this build; the file manager is read-only",
+		Roots:        []rootDoc{},
+		Writable:     false,
+		Note:         "storage roots default to read-only; writable roots support explicit operator actions",
+		Capabilities: []string{"upload", "mkdir", "rename", "copy", "move", "trash", "restore", "purge", "cancel", "batch"},
 	}
 	if s.Files == nil {
 		out.Note = "no storage roots are configured"
 		return out
 	}
 	for _, r := range s.Files.Roots() {
+		writable := r.Writable && r.Available && s.Jobs != nil && !s.Jobs.ReadOnlyConsole()
+		if writable {
+			out.Writable = true
+		}
 		out.Roots = append(out.Roots, rootDoc{
 			ID: r.ID, Label: r.Label, Path: r.Path, ExposeHidden: r.ExposeHidden,
 			Available: r.Available, Note: r.Note,
+			Writable: writable,
+			Capacity: r.Capacity, CapacityError: r.CapacityError,
 		})
 	}
+	out.UploadMaxBytes = s.Files.Limits().UploadMaxBytes
+	l := s.Files.Limits()
+	out.Limits = config.FileLimits{MaxEntries: l.MaxEntries, MaxPageSize: l.MaxPageSize, DefaultPageSize: l.DefaultPageSize, SearchMaxResults: l.SearchMaxResults, SearchMaxExamined: l.SearchMaxExamined, PreviewMaxBytes: l.PreviewMaxBytes, UploadMaxBytes: l.UploadMaxBytes, TrashMaxEntries: l.TrashMaxEntries, CopyMaxEntries: l.CopyMaxEntries, CopyMaxBytes: l.CopyMaxBytes, BatchMaxItems: l.BatchMaxItems}
 	if len(out.Roots) == 0 {
 		out.Note = "no storage roots are configured; add [[hub.storage]] entries"
 	}
@@ -454,7 +476,19 @@ func (s *Server) rootsInfo() rootsResponse {
 }
 
 func (s *Server) handleRoots(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.rootsInfo())
+	writeJSON(w, http.StatusOK, s.rootsFor(r))
+}
+
+func (s *Server) rootsFor(r *http.Request) rootsResponse {
+	out := s.rootsInfo()
+	if principalOf(r.Context()).ReadOnlyUser() {
+		out.Writable = false
+		for i := range out.Roots {
+			out.Roots[i].Writable = false
+		}
+		out.Capabilities = []string{}
+	}
+	return out
 }
 
 // entryDoc is one directory entry as the UI sees it.
@@ -493,6 +527,9 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page, size := s.pageParams(r)
+	if r.URL.Query().Get("page_size") == "" {
+		size = s.Files.Limits().DefaultPageSize
+	}
 	root := r.URL.Query().Get("root")
 	if root == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "the root parameter is required")
@@ -570,7 +607,7 @@ func (s *Server) handleFileStat(w http.ResponseWriter, r *http.Request) {
 			Symlink: e.Symlink, Kind: e.Kind,
 		},
 		"preview_kind": kind,
-		"previewable":  previewable && !e.IsDir,
+		"previewable":  previewable && !e.IsDir && (kind != "image" || e.Size <= min(s.Cfg.PreviewMaxBytes, s.Files.Limits().PreviewMaxBytes)),
 	})
 }
 
@@ -675,11 +712,12 @@ func (s *Server) handleFilePreview(w http.ResponseWriter, r *http.Request) {
 	// process a bounded buffer per request rather than the whole file - and
 	// capping it at 32 MiB would make video playback impossible, which is the
 	// feature the cap would be breaking.
-	if kind == "image" && fi.Size() > s.Cfg.PreviewMaxBytes {
+	previewLimit := min(s.Cfg.PreviewMaxBytes, s.Files.Limits().PreviewMaxBytes)
+	if kind == "image" && fi.Size() > previewLimit {
 		writeError(w, http.StatusRequestEntityTooLarge, "too_large",
 			fmt.Sprintf("this image is %s; inline preview is limited to %s. "+
 				"Download it instead, or raise the limit in the configuration",
-				kb(fi.Size()/1024), kb(s.Cfg.PreviewMaxBytes/1024)))
+				kb(fi.Size()/1024), kb(previewLimit/1024)))
 		return
 	}
 
@@ -768,6 +806,10 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 		Op:   r.URL.Query().Get("op"),
 		Open: boolParam(r, "open"),
 	}
+	p := principalOf(r.Context())
+	if p.Kind == domain.PrincipalUser && !p.DeviceAdmin() {
+		f.Principal = p.String()
+	}
 	if st := r.URL.Query().Get("state"); st != "" {
 		if !domain.JobState(st).Valid() {
 			writeError(w, http.StatusBadRequest, "bad_request",
@@ -784,7 +826,9 @@ func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]jobSummary, 0, len(rows))
 	for _, j := range rows {
-		out = append(out, toJobSummary(j))
+		summary := toJobSummary(j)
+		summary.Cancellable = !j.State.Terminal() && canStopJob(principalOf(r.Context()), j) && s.canCancel(j.ID)
+		out = append(out, summary)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"jobs": out, "limit": limit, "offset": offset,
@@ -806,13 +850,19 @@ func (s *Server) handleJob(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, "state_error", err)
 		return
 	}
+	if !canReadJob(principalOf(r.Context()), *j) {
+		writeError(w, 404, "not_found", "no such job")
+		return
+	}
 	events, err := s.Jobs.Store().JobEvents(r.Context(), id, 200)
 	if err != nil {
 		s.fail(w, http.StatusInternalServerError, "state_error", err)
 		return
 	}
+	summary := toJobSummary(*j)
+	summary.Cancellable = !j.State.Terminal() && canStopJob(principalOf(r.Context()), *j) && s.canCancel(j.ID)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"job": toJobSummary(*j), "events": events,
+		"job": summary, "events": events,
 	})
 }
 

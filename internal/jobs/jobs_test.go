@@ -57,6 +57,99 @@ func newRig(t *testing.T, tune func(*Config, *hubstore.Limits)) *rig {
 	return r
 }
 
+func TestCancelledWorkRecordsItsTerminalState(t *testing.T) {
+	r := newRig(t, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	out := r.m.Run(ctx, RunOptions{Principal: domain.Principal{Kind: domain.PrincipalUser, Name: "operator"}, OperatorConsent: true, OpID: "files.mkdir", Target: "data", Args: operations.NewArgs().Str("root", "data").Str("path", "new"), Handler: func(ctx context.Context, _ *hubstore.Job, _ *operations.Args) (Result, error) {
+		cancel()
+		return Result{}, ctx.Err()
+	}})
+	if !errors.Is(out.Err, context.Canceled) || out.Job == nil || out.Job.State != domain.JobCancelled {
+		t.Fatalf("cancelled result: %+v", out)
+	}
+	stored, err := r.store.Job(context.Background(), out.Job.ID)
+	if err != nil || stored.State != domain.JobCancelled || stored.StopReason != "cancelled" {
+		t.Fatalf("durable cancellation: %+v %v", stored, err)
+	}
+}
+
+func TestTerminalJobReleasesMutexBeforeFinalAuditCompletes(t *testing.T) {
+	r := newRig(t, nil)
+	auditing, release := make(chan struct{}), make(chan struct{})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	r.m.cfg.Audit = func(_ context.Context, e hubstore.AuditEntry) error {
+		if e.Action == "call" && e.Outcome == "ok" && e.Target == "first" {
+			close(auditing)
+			<-release
+		}
+		return nil
+	}
+	args := operations.NewArgs().Str("root", "data").Str("to_root", "other").Str("from", "one").Str("to", "two").Int("limit", 10).Int("max_bytes", 1024)
+	accepted := make(chan string, 1)
+	finished := make(chan Outcome, 1)
+	principal := domain.Principal{Kind: domain.PrincipalUser, Name: "operator"}
+	go func() {
+		finished <- r.m.Run(context.Background(), RunOptions{Principal: principal, OpID: "files.copy", Args: args, Target: "first", OperatorConsent: true, OnAccepted: func(j *hubstore.Job) { accepted <- j.ID }, Handler: func(context.Context, *hubstore.Job, *operations.Args) (Result, error) {
+			return Result{Completed: true, Verified: true}, nil
+		}})
+	}()
+	select {
+	case <-auditing:
+	case <-time.After(3 * time.Second):
+		t.Fatal("final audit never reached")
+	}
+	var id string
+	select {
+	case id = <-accepted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("audit blocked before job acceptance")
+	}
+	job, err := r.store.Job(context.Background(), id)
+	if err != nil || !job.State.Terminal() {
+		t.Fatal(job, err)
+	}
+	op, _ := r.m.Registry().Lookup("files.copy")
+	if decision := r.m.Admit(context.Background(), principal, op, args); !decision.Allowed {
+		t.Fatal("terminal job still blocks next operation", decision)
+	}
+	close(release)
+	select {
+	case out := <-finished:
+		if out.Err != nil {
+			t.Fatal(out.Err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("run did not finish")
+	}
+}
+
+func TestOperatorConsentNeverApprovesAIHelpersOrPrivilegedCalls(t *testing.T) {
+	r := newRig(t, func(c *Config, _ *hubstore.Limits) { c.AllowAIHeavy = true })
+	for _, kind := range []domain.PrincipalKind{domain.PrincipalAI, domain.PrincipalHelper} {
+		called := false
+		out := r.m.Run(context.Background(), RunOptions{Principal: domain.Principal{Kind: kind, Name: "test"}, OperatorConsent: true, OpID: "files.mkdir", Target: "data", Args: operations.NewArgs().Str("root", "data").Str("path", "new"), Handler: func(context.Context, *hubstore.Job, *operations.Args) (Result, error) {
+			called = true
+			return Result{Completed: true}, nil
+		}})
+		if called || !errors.Is(out.Err, ErrNeedsApproval) {
+			t.Fatalf("consent promoted %s: %+v", kind, out)
+		}
+	}
+	out := r.m.Run(context.Background(), RunOptions{Principal: domain.Principal{Kind: domain.PrincipalUser, Name: "operator"}, OperatorConsent: true, OpID: "schedule.disable", Target: "system", Args: operations.NewArgs(), Handler: func(context.Context, *hubstore.Job, *operations.Args) (Result, error) {
+		t.Fatal("consent approved privileged work")
+		return Result{}, nil
+	}})
+	if !errors.Is(out.Err, ErrNeedsApproval) {
+		t.Fatal("privileged operation accepted", out.Err)
+	}
+}
+
 func (r *rig) ctx() context.Context { return context.Background() }
 
 // findAudit returns the last audit row for an operation.
@@ -208,6 +301,33 @@ func TestAnAICannotStartHeavyWorkByDefault(t *testing.T) {
 		operations.NewArgs().Str("collection", "photos").Int("limit", 10))
 	if !d.Allowed {
 		t.Fatalf("with allow_ai_heavy the call was still refused at admission: %s", d.Detail)
+	}
+}
+
+func TestPauseCommandsRemainPossibleDuringPausedModesWithoutBypassingOtherGates(t *testing.T) {
+	for _, readonly := range []bool{false, true} {
+		r := newRig(t, func(c *Config, _ *hubstore.Limits) { c.ReadOnlyConsole = readonly })
+		operator := domain.Principal{Kind: domain.PrincipalUser, Name: "operator"}
+		if err := r.store.SetMode(r.ctx(), domain.ModeState{Mode: domain.ModeManualPause, Source: "test", SetAt: r.now}); err != nil {
+			t.Fatal(err)
+		}
+		args := operations.NewArgs().Int("episode", 1)
+		d := r.m.Admit(r.ctx(), operator, op(t, "anime.download.pause"), args)
+		if readonly {
+			if d.Gate != GateReadOnly {
+				t.Fatal(d)
+			}
+		} else if !d.Allowed {
+			t.Fatal(d)
+		}
+		resume := r.m.Admit(r.ctx(), operator, op(t, "anime.download.resume"), args)
+		if resume.Allowed {
+			t.Fatal("resume bypassed paused mode")
+		}
+		ai := r.m.Admit(r.ctx(), domain.Principal{Kind: domain.PrincipalAI, Name: "agent"}, op(t, "anime.download.pause"), args)
+		if ai.Allowed {
+			t.Fatal("pause bypassed AI restriction")
+		}
 	}
 }
 

@@ -1,7 +1,6 @@
 // Package files is the console's own file manager. It is written here rather
-// than borrowed from FileBrowser: the requirement is our own front end, back end,
-// permissions and operations, with FileBrowser kept as a fallback entry point
-// until this module passes acceptance.
+// than copied from another service. CasaOS file workflows are the functional
+// reference; the frontend, containment and operations are implemented here.
 //
 // Two properties matter more than features, and both are structural rather than
 // checked:
@@ -15,8 +14,8 @@
 //     window; this does not.
 //
 //   - **No listing is unbounded.** Every read is one directory level, paged, with
-//     a cap on entries examined. Nothing here walks a tree, and no code path
-//     recurses on behalf of an HTTP request.
+//     a cap on entries examined. Search has depth, result and examination caps.
+//     File writes require an opt-in root; publish/move/restore never overwrite.
 package files
 
 import (
@@ -28,6 +27,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -76,6 +76,11 @@ type Limits struct {
 	// browser bytes it can already render, and refuses to hand it something
 	// enormous.
 	PreviewMaxBytes int64
+	UploadMaxBytes  int64
+	TrashMaxEntries int
+	CopyMaxEntries  int
+	CopyMaxBytes    int64
+	BatchMaxItems   int
 }
 
 // DefaultLimits returns the shipped bounds.
@@ -87,6 +92,11 @@ func DefaultLimits() Limits {
 		SearchMaxResults:  200,
 		SearchMaxExamined: 20000,
 		PreviewMaxBytes:   32 << 20, // 32 MiB
+		UploadMaxBytes:    8 << 30,
+		TrashMaxEntries:   1000,
+		CopyMaxEntries:    10000,
+		CopyMaxBytes:      8 << 30,
+		BatchMaxItems:     100,
 	}
 }
 
@@ -96,6 +106,8 @@ type Root struct {
 	Label        string
 	Path         string
 	ExposeHidden bool
+	Writable     bool
+	writeMu      sync.Mutex
 
 	dir *os.Root
 }
@@ -107,8 +119,11 @@ type RootInfo struct {
 	Path         string `json:"path"`
 	ExposeHidden bool   `json:"expose_hidden"`
 	Available    bool   `json:"available"`
+	Writable     bool   `json:"writable"`
 	// Note explains an unavailable root in words an operator can act on.
-	Note string `json:"note,omitempty"`
+	Note          string    `json:"note,omitempty"`
+	Capacity      *Capacity `json:"capacity,omitempty"`
+	CapacityError string    `json:"capacity_error,omitempty"`
 }
 
 // Entry is one directory entry.
@@ -157,6 +172,40 @@ type Manager struct {
 // unavailable, and every operation against it fails with ErrRootUnavailable
 // rather than reporting an empty directory.
 func New(storages []config.HubStorage, limits Limits) (*Manager, error) {
+	d := DefaultLimits()
+	if limits.MaxEntries == 0 {
+		limits.MaxEntries = d.MaxEntries
+	}
+	if limits.MaxPageSize == 0 {
+		limits.MaxPageSize = d.MaxPageSize
+	}
+	if limits.DefaultPageSize == 0 {
+		limits.DefaultPageSize = d.DefaultPageSize
+	}
+	if limits.SearchMaxResults == 0 {
+		limits.SearchMaxResults = d.SearchMaxResults
+	}
+	if limits.SearchMaxExamined == 0 {
+		limits.SearchMaxExamined = d.SearchMaxExamined
+	}
+	if limits.PreviewMaxBytes == 0 {
+		limits.PreviewMaxBytes = d.PreviewMaxBytes
+	}
+	if limits.CopyMaxEntries == 0 {
+		limits.CopyMaxEntries = DefaultLimits().CopyMaxEntries
+	}
+	if limits.CopyMaxBytes == 0 {
+		limits.CopyMaxBytes = DefaultLimits().CopyMaxBytes
+	}
+	if limits.BatchMaxItems == 0 {
+		limits.BatchMaxItems = DefaultLimits().BatchMaxItems
+	}
+	if limits.UploadMaxBytes <= 0 {
+		limits.UploadMaxBytes = DefaultLimits().UploadMaxBytes
+	}
+	if limits.TrashMaxEntries <= 0 {
+		limits.TrashMaxEntries = DefaultLimits().TrashMaxEntries
+	}
 	m := &Manager{roots: map[string]*Root{}, limits: limits}
 	for _, s := range storages {
 		r := &Root{
@@ -164,6 +213,7 @@ func New(storages []config.HubStorage, limits Limits) (*Manager, error) {
 			Label:        s.Label,
 			Path:         s.Path,
 			ExposeHidden: s.ExposeHidden,
+			Writable:     s.Writable,
 		}
 		if r.Label == "" {
 			r.Label = s.ID
@@ -208,9 +258,20 @@ func (m *Manager) Roots() []RootInfo {
 			Path:         r.Path,
 			ExposeHidden: r.ExposeHidden,
 			Available:    r.dir != nil,
+			Writable:     r.Writable,
 		}
 		if r.dir == nil {
 			info.Note = describeUnavailable(r.Path)
+		} else {
+			capacity, err := capacityFor(r)
+			if err == nil {
+				info.Capacity = capacity
+			} else if errors.Is(err, ErrRootUnavailable) {
+				info.Available = false
+				info.Note = "storage path or mount changed; reconnect the configured root"
+			} else {
+				info.CapacityError = "filesystem capacity could not be read"
+			}
 		}
 		out = append(out, info)
 	}
@@ -239,6 +300,11 @@ func (m *Manager) root(id string) (*Root, error) {
 	}
 	if r.dir == nil {
 		return nil, fmt.Errorf("%w: %s", ErrRootUnavailable, r.Path)
+	}
+	if f, err := connectedRoot(r); err != nil {
+		return nil, err
+	} else {
+		_ = f.Close()
 	}
 	return r, nil
 }
@@ -287,6 +353,11 @@ func cleanRel(p string) (string, error) {
 	if strings.HasPrefix(c, "/") {
 		return "", fmt.Errorf("%w: must be relative", ErrBadPath)
 	}
+	for _, segment := range strings.Split(c, "/") {
+		if internalName(segment) {
+			return "", fmt.Errorf("%w: reserved internal directory", ErrOutsideRoot)
+		}
+	}
 	return c, nil
 }
 
@@ -299,6 +370,9 @@ func mapErr(err error) error {
 	}
 	if errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("%w: %v", ErrNotExist, err)
+	}
+	if errors.Is(err, syscall.ENOTDIR) {
+		return fmt.Errorf("%w: not a directory", ErrBadPath)
 	}
 	// os.Root refuses escapes with this sentinel.
 	if errors.Is(err, os.ErrPermission) {
@@ -421,7 +495,7 @@ func (m *Manager) List(rootID string, o ListOptions) (*Listing, error) {
 	}
 	o = m.clamp(o)
 
-	dir, err := r.dir.Open(rel)
+	dir, err := safeOpen(r.dir, rel, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NONBLOCK)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -434,7 +508,7 @@ func (m *Manager) List(rootID string, o ListOptions) (*Listing, error) {
 		return nil, fmt.Errorf("%w: %s is not a directory", ErrBadPath, rel)
 	}
 
-	entries, truncated, err := readDirBounded(dir, r.ExposeHidden, m.limits.MaxEntries)
+	entries, truncated, _, err := readDirBounded(dir, r.ExposeHidden, m.limits.MaxEntries)
 	if err != nil {
 		return nil, err
 	}
@@ -469,27 +543,32 @@ func (m *Manager) List(rootID string, o ListOptions) (*Listing, error) {
 // readDirBounded reads one directory, skipping hidden names unless asked, and
 // stops after max entries. It stats every entry it keeps, because a listing that
 // shows sizes and times must know them; the cap is what bounds that cost.
-func readDirBounded(dir *os.File, exposeHidden bool, max int) ([]Entry, bool, error) {
+func readDirBounded(dir *os.File, exposeHidden bool, max int) ([]Entry, bool, int, error) {
 	out := make([]Entry, 0, 64)
 	truncated := false
+	examined := 0
 	for {
 		batch, err := dir.ReadDir(256)
 		if err != nil && !errors.Is(err, io.EOF) {
-			return nil, false, err
+			return nil, false, examined, err
 		}
 		for _, de := range batch {
+			if examined >= max {
+				return out, true, examined, nil
+			}
+			examined++
 			name := de.Name()
-			if !exposeHidden && strings.HasPrefix(name, ".") {
+			if internalName(name) {
 				continue
 			}
-			if len(out) >= max {
-				return out, true, nil
+			if !exposeHidden && strings.HasPrefix(name, ".") {
+				continue
 			}
 			e := Entry{Name: name}
 			// de.Info() on a directory read from an os.Root is an lstat-like
 			// result: it does not follow a symlink out of the root, so an
 			// escaping link is listed as a link, never as its target.
-			if info, ierr := de.Info(); ierr == nil {
+			if info, ierr := infoAt(dir, name); ierr == nil {
 				e.Size = info.Size()
 				e.ModTime = info.ModTime()
 				e.Mode = info.Mode().String()
@@ -500,7 +579,7 @@ func readDirBounded(dir *os.File, exposeHidden bool, max int) ([]Entry, bool, er
 			out = append(out, e)
 		}
 		if errors.Is(err, io.EOF) {
-			return out, truncated, nil
+			return out, truncated, examined, nil
 		}
 	}
 }
@@ -574,7 +653,7 @@ func (m *Manager) Stat(rootID, rel string) (*Entry, error) {
 	}
 	// Lstat first: whether the entry is a symlink is part of what the caller is
 	// asking, and following it before answering would hide that.
-	info, err := r.dir.Lstat(clean)
+	info, err := safeLstat(r.dir, clean)
 	if err != nil {
 		return nil, mapErr(err)
 	}
@@ -615,7 +694,7 @@ func (m *Manager) Open(rootID, rel string) (*os.File, os.FileInfo, error) {
 	// handler - and its goroutine and file descriptor - indefinitely. With
 	// O_NONBLOCK the open returns at once and the mode check below refuses the
 	// FIFO; for regular files the flag has no effect on subsequent reads.
-	f, err := r.dir.OpenFile(clean, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	f, err := safeOpen(r.dir, clean, os.O_RDONLY|syscall.O_NONBLOCK)
 	if err != nil {
 		return nil, nil, mapErr(err)
 	}
@@ -705,14 +784,20 @@ func (m *Manager) Search(rootID string, o SearchOptions) (*SearchResult, error) 
 			res.Truncated, res.Reason = true, "depth cap"
 			return false
 		}
-		d, err := r.dir.Open(dirRel)
+		d, err := safeOpen(r.dir, dirRel, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NONBLOCK)
 		if err != nil {
 			// An unreadable subdirectory is skipped, not fatal: one bad
 			// directory must not fail the whole search.
 			return true
 		}
 		defer d.Close()
-		entries, truncated, err := readDirBounded(d, r.ExposeHidden, m.limits.SearchMaxExamined)
+		remaining := m.limits.SearchMaxExamined - res.Examined
+		if remaining <= 0 {
+			res.Truncated, res.Reason = true, "examined cap"
+			return false
+		}
+		entries, truncated, examined, err := readDirBounded(d, r.ExposeHidden, remaining)
+		res.Examined += examined
 		if err != nil {
 			return true
 		}
@@ -721,11 +806,6 @@ func (m *Manager) Search(rootID string, o SearchOptions) (*SearchResult, error) 
 		}
 		var subdirs []string
 		for _, e := range entries {
-			res.Examined++
-			if res.Examined > m.limits.SearchMaxExamined {
-				res.Truncated, res.Reason = true, "examined cap"
-				return false
-			}
 			e.Path = displayPath(joinRel(dirRel, e.Name))
 			if strings.Contains(strings.ToLower(e.Name), q) {
 				if len(res.Entries) >= m.limits.SearchMaxResults {

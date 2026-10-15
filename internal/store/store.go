@@ -32,6 +32,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/YoisakiKnd/nasctl/internal/statelease"
 	"modernc.org/sqlite"
 )
 
@@ -103,6 +104,7 @@ type Store struct {
 	db       *sql.DB
 	path     string
 	readOnly bool
+	lease    *statelease.Lease
 }
 
 // Open opens or creates the index.
@@ -146,6 +148,20 @@ func Open(path string, opts Options) (*Store, error) {
 		}
 	}
 
+	var lease *statelease.Lease
+	keepLease := false
+	defer func() {
+		if !keepLease {
+			_ = lease.Close()
+		}
+	}()
+	if !opts.Memory && !opts.ReadOnly {
+		var err error
+		lease, err = statelease.Acquire(filepath.Dir(path), false)
+		if err != nil {
+			return nil, err
+		}
+	}
 	dsn := buildDSN(path, opts)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -156,7 +172,7 @@ func Open(path string, opts Options) (*Store, error) {
 	db.SetConnMaxLifetime(0)
 	db.SetConnMaxIdleTime(0)
 
-	s := &Store{db: db, path: path, readOnly: opts.ReadOnly}
+	s := &Store{db: db, path: path, readOnly: opts.ReadOnly, lease: lease}
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("store: ping %s: %w", path, err)
@@ -177,6 +193,7 @@ func Open(path string, opts Options) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	keepLease = true
 	return s, nil
 }
 
@@ -234,7 +251,11 @@ func (s *Store) Close() error {
 		_, _ = s.db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`)
 		cancel()
 	}
-	return s.db.Close()
+	err := s.db.Close()
+	if release := s.lease.Close(); err == nil {
+		err = release
+	}
+	return err
 }
 
 // Path returns the index file path.

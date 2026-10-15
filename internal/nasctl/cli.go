@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,11 +34,13 @@ import (
 	"github.com/YoisakiKnd/nasctl/internal/jobs"
 	"github.com/YoisakiKnd/nasctl/internal/operations"
 	"github.com/YoisakiKnd/nasctl/internal/resource"
+	"github.com/YoisakiKnd/nasctl/internal/statelease"
 	"github.com/YoisakiKnd/nasctl/internal/suzu"
 )
 
 // Env carries what the commands need.
 type Env struct {
+	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
 	// Now is injectable so that output is reproducible in tests.
@@ -46,6 +49,9 @@ type Env struct {
 
 // Main runs the CLI and returns a process exit code.
 func Main(argv []string, env Env) int {
+	if env.Stdin == nil {
+		env.Stdin = os.Stdin
+	}
 	if env.Stdout == nil {
 		env.Stdout = os.Stdout
 	}
@@ -80,9 +86,13 @@ func Main(argv []string, env Env) int {
 	case "version":
 		fmt.Fprintf(env.Stdout, "nasctl %s (schema %d)\n", buildinfo.Version, buildinfo.Schema)
 		return 0
+	case "init":
+		ctx, stop := signalContext()
+		defer stop()
+		return cmdInit(ctx, env, globals, rest)
 	}
 
-	cfg, err := loadConfig(globals)
+	cfg, err := loadCommandConfig(globals, cmd, rest)
 	if err != nil {
 		fmt.Fprintf(env.Stderr, "nasctl: %v\n", err)
 		return 1
@@ -90,6 +100,36 @@ func Main(argv []string, env Env) int {
 
 	ctx, cancel := signalContext()
 	defer cancel()
+	// Catalogs and configuration share this lifetime lease even when --hub-db
+	// points elsewhere. Offline restore cannot race a running NAS console.
+	offlineRepair := len(rest) > 0 && (cmd == "users" && rest[0] == "recover" || cmd == "settings" && rest[0] == "reset")
+	if cmd != "state" && !offlineRepair {
+		if cmd == "serve" {
+			if err := os.MkdirAll(cfg.Paths.StateDir, 0750); err != nil {
+				fmt.Fprintln(env.Stderr, "nasctl:", err)
+				return 1
+			}
+		}
+		if _, err := os.Stat(cfg.Paths.StateDir); err == nil {
+			lease, err := statelease.Acquire(cfg.Paths.StateDir, false)
+			if err != nil {
+				fmt.Fprintln(env.Stderr, "nasctl:", err)
+				return 1
+			}
+			defer lease.Close()
+			// Re-read under the lifetime lease: a completed offline restore may
+			// have changed the overlay between the initial parse and acquisition.
+			statePath := cfg.Paths.StateDir
+			cfg, err = loadCommandConfig(globals, cmd, rest)
+			if err != nil || cfg.Paths.StateDir != statePath {
+				fmt.Fprintln(env.Stderr, "nasctl: configuration changed while acquiring state lease; retry after reviewing it")
+				return 1
+			}
+		} else if !os.IsNotExist(err) {
+			fmt.Fprintln(env.Stderr, "nasctl:", err)
+			return 1
+		}
+	}
 
 	switch cmd {
 	case "status":
@@ -104,6 +144,12 @@ func Main(argv []string, env Env) int {
 		return cmdAudit(ctx, env, cfg, globals)
 	case "files":
 		return cmdFiles(ctx, env, cfg, globals, rest)
+	case "state":
+		return cmdState(ctx, env, cfg, globals, rest)
+	case "users":
+		return cmdUsers(ctx, env, cfg, globals, rest)
+	case "settings":
+		return cmdSettings(ctx, env, cfg, globals, rest)
 	case "mode":
 		return cmdMode(ctx, env, cfg, globals, rest)
 	case "approvals":
@@ -184,6 +230,18 @@ func loadConfig(g globals) (*config.Config, error) {
 		return nil, fmt.Errorf("cannot read the configuration at %s: %w (use --config to "+
 			"point at another file)", path, err)
 	}
+	return config.LoadNAS(path)
+}
+
+func loadCommandConfig(g globals, command string, args []string) (*config.Config, error) {
+	maintenance := len(args) > 0 && (command == "state" && args[0] == "recover" || command == "users" && (args[0] == "password" || args[0] == "setup-code" || args[0] == "recover") || command == "settings" && args[0] == "reset")
+	if !maintenance {
+		return loadConfig(g)
+	}
+	path := g.configPath
+	if path == "" {
+		path = "/etc/albumctl/config.toml"
+	}
 	return config.Load(path)
 }
 
@@ -219,6 +277,11 @@ func newManager(cfg *config.Config, st *hubstore.Store, g globals) (*jobs.Manage
 		StartHold:              cfg.Guard.StartHold.D(),
 		SampleInterval:         cfg.Guard.SampleInterval.D(),
 	}, sampler)
+	// The native console can be developed on macOS. Linux-specific resource
+	// sampling remains mandatory for albumctl decoders, which are separate.
+	if runtime.GOOS != "linux" {
+		guard = nil
+	}
 
 	return jobs.New(jobs.Config{
 		Registry: reg,
@@ -284,9 +347,17 @@ Commands:
   status              Machine, mode, jobs and storage in one view
   doctor              Read-only check of configuration, storage and resources
   serve               Run the web console (foreground)
+  init                Create a new private NAS config; never overwrite
+  users list|setup-code|create|set|password|remove|recover
+                      Local account administration; passwords via stdin
+  settings reset      Offline repair of saved settings; --confirm required
   files list          List a directory in a storage root
   files stat          Show one entry's metadata
   files search        Bounded search for a name
+  files mkdir|rename|upload|copy|move|trash|restore|purge|batch
+                      Operator writes; --confirm required (use -h for flags)
+  state backup|verify|restore|recover
+                      Private offline service state; see docs/STATE-BACKUPS.md
   ops                 Print the operation table
   jobs list           List job history
   jobs show ID        Show one job and its event history
@@ -306,7 +377,8 @@ Global flags:
 Notes:
   This console does not scan, decode or generate thumbnails. Those are bounded
   tasks of the album service, run as separate commands with their own limits.
-  File writes are not implemented in this build; the file manager is read-only.
+  Console file writes require an opt-in writable root and exact operator consent.
+  File limits and batch/CLI workflows are documented in docs/FILES.md.
 `)
 }
 
@@ -379,7 +451,7 @@ func cmdStatus(ctx context.Context, env Env, cfg *config.Config, g globals) int 
 
 	// The roots are opened through the files manager so that a missing mount is
 	// reported as unavailable rather than as an empty directory.
-	if fm, err := files.New(cfg.Hub.Storage, files.DefaultLimits()); err == nil {
+	if fm, err := files.New(cfg.Hub.Storage, files.ConfigLimits(cfg.Hub.Files)); err == nil {
 		doc.Roots = fm.Roots()
 		_ = fm.Close()
 	}
@@ -509,7 +581,7 @@ func cmdDoctor(ctx context.Context, env Env, cfg *config.Config, g globals) int 
 	checked = append(checked, fmt.Sprintf("state_dir %s", cfg.Paths.StateDir))
 
 	// Storage roots: existence, directory-ness, and identity.
-	fm, err := files.New(cfg.Hub.Storage, files.DefaultLimits())
+	fm, err := files.New(cfg.Hub.Storage, files.ConfigLimits(cfg.Hub.Files))
 	if err != nil {
 		problems = append(problems, "the storage roots could not be opened: "+err.Error())
 	} else {
@@ -793,10 +865,10 @@ func cmdAudit(ctx context.Context, env Env, cfg *config.Config, g globals) int {
 
 func cmdFiles(ctx context.Context, env Env, cfg *config.Config, g globals, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(env.Stderr, "nasctl files: expected list, stat or search")
+		fmt.Fprintln(env.Stderr, "nasctl files: expected roots, list, stat, search, mkdir, rename, upload, copy, move, trash, restore, purge or batch")
 		return 2
 	}
-	fm, err := files.New(cfg.Hub.Storage, files.DefaultLimits())
+	fm, err := files.New(cfg.Hub.Storage, files.ConfigLimits(cfg.Hub.Files))
 	if err != nil {
 		fmt.Fprintf(env.Stderr, "nasctl: %v\n", err)
 		return 1
@@ -805,6 +877,10 @@ func cmdFiles(ctx context.Context, env Env, cfg *config.Config, g globals, args 
 
 	sub := args[0]
 	fs := flag.NewFlagSet("files "+sub, flag.ContinueOnError)
+	switch sub {
+	case "mkdir", "rename", "upload", "copy", "move", "trash", "restore", "purge", "batch":
+		return cmdFileWrite(ctx, env, cfg, g, fm, sub, args[1:])
+	}
 	fs.SetOutput(env.Stderr)
 	root := fs.String("root", "", "storage root ID")
 	pathFlag := fs.String("path", "/", "root-relative path")

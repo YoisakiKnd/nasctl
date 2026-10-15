@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -32,11 +33,16 @@ type Hub struct {
 	// "/mnt/data/photos", so no request can name a directory the operator did
 	// not configure.
 	Storage []HubStorage `toml:"storage"`
+	// Setup permits an initially empty NAS. Until its first administrator is
+	// created, the console requires the private local setup challenge.
+	Setup bool `toml:"setup"`
 
 	// Suzu describes the existing IWantWatchAnime service. The console reads its
 	// database and calls its API; it never writes that database, because suzu is
 	// the only writer of its own state.
-	Suzu Suzu `toml:"suzu"`
+	Suzu  Suzu  `toml:"suzu"`
+	Anime Anime `toml:"anime"`
+	Album Album `toml:"album"`
 
 	// Agents lists credentials that identify an AI principal. This is what makes
 	// the agent distinction real rather than advisory.
@@ -49,7 +55,8 @@ type Hub struct {
 	Agents []Agent `toml:"agents"`
 
 	// Jobs bounds the console's own job records.
-	Jobs JobLimits `toml:"jobs"`
+	Jobs  JobLimits  `toml:"jobs"`
+	Files FileLimits `toml:"files"`
 }
 
 // Agent is one AI principal's credential.
@@ -66,21 +73,18 @@ type Agent struct {
 
 // HubStorage is one browsable root.
 type HubStorage struct {
-	ID    string `toml:"id"`
-	Label string `toml:"label"`
-	Path  string `toml:"path"`
+	ID    string `toml:"id" json:"id"`
+	Label string `toml:"label" json:"label"`
+	Path  string `toml:"path" json:"path"`
 
-	// Writable is refused while it is true. File writes (upload, mkdir, rename,
-	// move, copy, trash) are stage E work: the code does not exist yet, so
-	// accepting this flag would promise a capability the binary does not have.
-	// The key is parsed rather than rejected outright so that a config written
-	// for a later version produces a clear message instead of a typo report.
-	Writable bool `toml:"writable"`
+	// Writable enables explicit operator file operations for this root only.
+	// It defaults off; state/cache paths and overlapping writable roots are refused.
+	Writable bool `toml:"writable" json:"writable"`
 
 	// ExposeHidden includes dot-prefixed entries in listings. Off by default:
 	// hidden files on a NAS are usually tool state (.tmp, .stfolder, @eaDir),
 	// and showing them invites an operator to delete something a tool needs.
-	ExposeHidden bool `toml:"expose_hidden"`
+	ExposeHidden bool `toml:"expose_hidden" json:"expose_hidden"`
 }
 
 // Suzu configures the read-only integration with IWantWatchAnime.
@@ -107,14 +111,14 @@ type JobLimits struct {
 	// MaxOpenJobs caps queued+running jobs. A console on a 981 MiB machine
 	// should never have many, and a cap makes "the queue grew without bound"
 	// impossible rather than unlikely.
-	MaxOpenJobs int `toml:"max_open_jobs"`
+	MaxOpenJobs int `toml:"max_open_jobs" json:"max_open_jobs"`
 
 	// MaxHistory caps finished job rows; older ones are pruned by the console
 	// itself. Bounded growth, like everything else that writes.
-	MaxHistory int `toml:"max_history"`
+	MaxHistory int `toml:"max_history" json:"max_history"`
 
 	// AuditRetentionDays bounds the audit log.
-	AuditRetentionDays int `toml:"audit_retention_days"`
+	AuditRetentionDays int `toml:"audit_retention_days" json:"audit_retention_days"`
 }
 
 // storageIDPattern keeps IDs to characters that survive a URL path segment
@@ -127,6 +131,7 @@ var storageIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 // every other setting.
 func (c *Config) finalizeHub(fail func(string, ...any)) {
 	h := &c.Hub
+	h.Files.finalize(fail)
 	serverToken := c.Server.Token
 
 	if h.Jobs.MaxOpenJobs <= 0 {
@@ -210,9 +215,62 @@ func (c *Config) finalizeHub(fail func(string, ...any)) {
 			fail("%s.path %q is not clean (did you mean %q?)", where, s.Path, cleaned)
 		}
 		if s.Writable {
-			fail("%s.writable = true is refused: file writes are not implemented in this "+
-				"version, so this flag would claim a capability the binary does not have. "+
-				"Leave it false until upload/rename/trash are delivered and accepted", where)
+			if filepath.Clean(s.Path) == "/" {
+				fail("%s writable root must not be /", where)
+			}
+			for _, reserved := range []string{c.Paths.StateDir, c.Paths.CacheDir} {
+				if pathContains(resolvedHubPath(s.Path), resolvedHubPath(reserved)) || pathContains(resolvedHubPath(reserved), resolvedHubPath(s.Path)) {
+					fail("%s writable root must not overlap state/cache directories", where)
+				}
+			}
+		}
+		for j := 0; j < i; j++ {
+			other := h.Storage[j]
+			if (s.Writable || other.Writable) && (pathContains(resolvedHubPath(s.Path), resolvedHubPath(other.Path)) || pathContains(resolvedHubPath(other.Path), resolvedHubPath(s.Path))) {
+				fail("%s overlaps hub.storage[%d]; writable roots must have separate directory trees", where, j)
+			}
+		}
+		for _, p := range []string{s.Path, resolvedHubPath(s.Path)} {
+			for _, segment := range strings.Split(filepath.ToSlash(p), "/") {
+				if StoragePrivateName(segment) {
+					fail("%s cannot point into private file-manager or backup directories", where)
+					break
+				}
+			}
+		}
+	}
+	if h.Anime.Enabled {
+		if p := h.Anime.QBittorrentDownloadDir; p != "" && (!path.IsAbs(p) || path.Clean(p) == "/" || path.Clean(p) != p || strings.ContainsAny(p, "\\\r\n\x00")) {
+			fail("hub.anime.qbittorrent_download_dir must be a clean absolute POSIX directory other than /")
+		}
+		for name, p := range map[string]string{"download_dir": h.Anime.DownloadDir, "library_dir": h.Anime.LibraryDir} {
+			if !filepath.IsAbs(p) || filepath.Clean(p) == "/" {
+				fail("hub.anime.%s must be an absolute directory other than /", name)
+			}
+			for _, reserved := range []string{c.Paths.StateDir, c.Paths.CacheDir} {
+				if pathContains(p, reserved) || pathContains(reserved, p) {
+					fail("hub.anime.%s must not overlap state or cache directories", name)
+				}
+			}
+		}
+		if pathContains(h.Anime.DownloadDir, h.Anime.LibraryDir) || pathContains(h.Anime.LibraryDir, h.Anime.DownloadDir) {
+			fail("hub.anime download_dir and library_dir must not overlap")
+		}
+		u, err := url.Parse(h.Anime.QBittorrentURL)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+			fail("hub.anime.qbittorrent_url must be an http(s) URL without credentials, query or fragment")
+		}
+		if h.Anime.PollIntervalSeconds == 0 {
+			h.Anime.PollIntervalSeconds = 900
+		}
+		if h.Anime.PollIntervalSeconds < 60 {
+			fail("hub.anime.poll_interval_seconds must be at least 60")
+		}
+		if h.Anime.MaxItemsPerFeed == 0 {
+			h.Anime.MaxItemsPerFeed = 200
+		}
+		if h.Anime.MaxItemsPerFeed < 1 || h.Anime.MaxItemsPerFeed > 1000 {
+			fail("hub.anime.max_items_per_feed must be 1..1000")
 		}
 	}
 
@@ -248,6 +306,27 @@ func (c *Config) finalizeHub(fail func(string, ...any)) {
 				fail("hub.suzu.api_base %q must be a loopback address or localhost", sz.APIBase)
 			}
 		}
+	}
+}
+
+// Resolve existing ancestors too: state/cache directories may be created only
+// after config validation, but a symlinked parent must not evade root isolation.
+func resolvedHubPath(p string) string {
+	if p == "" || !filepath.IsAbs(p) {
+		return p
+	}
+	original := p
+	suffix := ""
+	for {
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			return filepath.Join(resolved, suffix)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return original
+		}
+		suffix = filepath.Join(filepath.Base(p), suffix)
+		p = parent
 	}
 }
 

@@ -30,6 +30,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,6 +54,9 @@ type Server struct {
 	Store   *store.Store
 	Log     *logx.Logger
 	Started time.Time
+	// OpenOriginal optionally anchors original reads to an already-open NAS
+	// storage root. It is set once at startup, before publishing the handler.
+	OpenOriginal func(context.Context, store.Media) (*os.File, error)
 
 	handler http.Handler
 	sem     chan struct{}
@@ -417,6 +421,7 @@ type resourceStatus struct {
 }
 
 type statusResponse struct {
+	IndexReady  bool               `json:"index_ready"`
 	Version     string             `json:"version"`
 	Schema      int                `json:"schema"`
 	Now         int64              `json:"now"`
@@ -442,6 +447,7 @@ func maxInt64(a, b int64) int64 {
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var resp statusResponse
+	resp.IndexReady = true
 	resp.Version = buildinfo.Version
 	resp.Schema = buildinfo.Schema
 	resp.Now = time.Now().Unix()
@@ -461,8 +467,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, c := range cols {
+		col, ok := s.Cfg.Collection(c.Code)
+		if !ok {
+			continue
+		}
 		resp.Collections = append(resp.Collections, collectionStatus{
-			Code: c.Code, Name: c.Name, Enabled: c.Enabled, MediaCount: c.MediaCount,
+			Code: c.Code, Name: col.Name, Enabled: col.Enabled, MediaCount: c.MediaCount,
 			MountOK: c.LastCheckOK, MountNote: c.LastCheckNote,
 		})
 	}
@@ -567,8 +577,12 @@ func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
 		Paused bool   `json:"paused"`
 	}{Items: []item{}}
 	for _, c := range cols {
+		col, ok := s.Cfg.Collection(c.Code)
+		if !ok {
+			continue
+		}
 		out.Items = append(out.Items, item{
-			Code: c.Code, Name: c.Name, Enabled: c.Enabled, MediaCount: c.MediaCount,
+			Code: c.Code, Name: col.Name, Enabled: col.Enabled, MediaCount: c.MediaCount,
 			MountOK: c.LastCheckOK, MountNote: c.LastCheckNote,
 			FirstSeen: c.FirstSeen, LastScan: c.LastScanAt,
 		})

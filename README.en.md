@@ -1,22 +1,27 @@
-# nasctl — a low-resource console for an ARM NAS
+# nasctl — a lightweight NAS console
 
-Two programs for a small ARMv7 NAS, built around one rule: **the machine staying
+Two programs for resource-conscious Linux NAS devices, built around one rule: **the machine staying
 up, and the original files staying intact, matter more than the features.**
 
 * **`albumctl`** — a photo and video index with a read-only web viewer. It scans
   directories and generates thumbnails, always as a bounded task with an explicit
   limit, a wall-clock budget and a resource guard that can stop it.
-* **`nasctl`** — a read-only console over the same machine: file browsing,
-  download and preview, the album index, the watch library, backup status, and the
-  console's own tasks.
+* **`nasctl`** — a NAS console: file browsing, preview, album index, native anime
+  subscriptions, media library, local backups and task history. Anime uses RSS,
+  qBittorrent and optional TMDB metadata.
 
-They are separate binaries on purpose. `nasctl` cannot reach a decoder, the
-scanner or a child process — that is enforced by an import-graph test, not by
-convention — so an HTTP request to the console cannot start a full-library scan.
+Start only `nasctl` for daily use: it reads the local album index directly, with
+no separate album HTTP service. Install `albumctl` beside it as the on-demand
+bounded processing component. Import-graph tests keep decoders, scanners and
+subprocess implementations out of the web query layer; explicit operator tasks
+pass admission and resource checks before starting the processing component.
 
-Nothing here moves, renames, deletes or rewrites an original file. File writes are
-declared and refused, and the configuration validator rejects the flag that would
-claim otherwise.
+Anime archiving preserves the downloaded originals and creates links or copies
+inside a separate library. File roots default to read-only; explicit writable
+roots support operator uploads, mkdir, bounded copy/cross-root move, rename,
+recoverable trash and explicitly confirmed permanent cleanup. Background tasks
+report progress and support cancellation without overwriting targets. See [file management](docs/FILES.md) and
+[media playback](docs/MEDIA.md).
 
 ## Why it exists
 
@@ -38,32 +43,43 @@ design follows from it:
 
 ## Status
 
-Development and offline testing are complete for the album service and for the
-console's read-only stage. **Nothing has been run on the target machine yet.**
-That is a deliberate boundary, not an oversight, and the list of what is therefore
-unverified — ARMv7 runtime behaviour, memory ceilings on the target, cgroup
-enforcement there, the real media tree, the real watch database — is in
-[`docs/HUB-STAGE-B.md`](docs/HUB-STAGE-B.md) §7.
+The native single-episode RSS → download → archive workflow and web UI are implemented.
+Auto-download and polling default to off. See [`docs/ANIME.md`](docs/ANIME.md) for
+configuration and current limits. AutoBangumi is the feature reference; no legacy
+IWantWatchAnime source or Telegram integration is required. The desktop and file
+manager follow the requested CasaOS/P2 layout. Linux amd64, arm64 and ARMv7 static
+builds pass; Linux/arm64 full race tests, native systemd/cgroup album processing,
+protocol fixtures, compatible upgrade/rollback and browser video playback pass.
+
+**Real NAS and qBittorrent integration remains unverified.** The historical list
+of target checks — ARMv7 runtime behaviour, memory ceilings on the target, cgroup
+enforcement there, the real media tree, the real watch database — and current
+verification evidence are in [`docs/VERIFICATION.md`](docs/VERIFICATION.md).
 
 ## Build
 
 Requires Go 1.27.1 or newer. Nothing else: no cgo, no cross-compiler, no Docker,
-no Node, no Python. The frontend is plain JavaScript embedded in the binary, with
-no build step.
+no Node, no Python for Go-only builds. The Svelte frontend's generated assets are
+committed and embedded in Go. To edit the UI, use Node 22.12+ and run
+`cd frontend && npm ci && npm run check && npm run build`.
+See [`docs/FRONTEND.md`](docs/FRONTEND.md) for the visual system and build workflow.
 
 ```sh
 go build ./...                       # both binaries
-go test ./...                        # the test suite
+go test ./...                        # full suite requires Linux /proc and process control
 
 # The ARMv7 artefacts, reproducibly
 SOURCE_DATE_EPOCH=1760000000 ./scripts/build-armv7.sh
 sha256sum -c dist/SHA256SUMS
 ```
 
-The build produces static 32-bit ARM binaries with no shared-library dependency,
+The script produces static 32-bit ARM binaries with no shared-library dependency,
 so the target needs nothing installed. Two builds from the same commit with the
 same `SOURCE_DATE_EPOCH` produce identical bytes, which is what makes the published
 checksum meaningful; CI checks that on every push.
+
+For other architectures, use e.g. `CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o nasctl ./cmd/nasctl`.
+macOS supports console development; album resource protection and the full suite require Linux.
 
 ## Running it
 
@@ -80,14 +96,15 @@ nasctl doctor --config /etc/albumctl/config.toml
 
 Every policy value in the example is the built-in default, so a line can be
 deleted to get the default back. Only `[paths]` and `[[collections]]` are local to
-a machine. A misspelled key is refused by name rather than ignored — most numbers
+a machine; native anime also requires explicit download/library directories.
+Photo collections can be omitted for a files-only or native-anime console. A misspelled key is refused by name rather than ignored — most numbers
 in the file are ceilings, and a silently dropped one would leave you believing a
 limit is in force when it is not.
 
 Then, deliberately and by hand:
 
 ```sh
-# The console, read-only. It never starts work of its own.
+# The console; anime polling is controlled by hub.anime.auto_poll.
 nasctl serve --config /etc/albumctl/config.toml
 
 # Album work, bounded, one collection at a time.
@@ -115,12 +132,20 @@ enabled as a separate decision.
 
 ## Access control
 
-The console has **no per-user authentication**. Its access control is the bind
-address, and that is checked at startup rather than documented after the fact: a
-public address is refused unless the operator explicitly opts in for an offline
-test. Bind it to a Tailscale address or to loopback behind an SSH tunnel. An
-optional shared token adds a bearer requirement; it distinguishes "has the token"
-from "does not", and every holder is the same principal.
+See [deployment, upgrades and compatible rollback](docs/DEPLOYMENT.md) for the current setup and resource policy.
+
+The console supports up to 32 local administrators, operators and viewers.
+Members share the configured files and media; server-side roles control writes
+and administration. Initialize a new deployment with `nasctl init`, then use its
+private local challenge to set up the first administrator. Keep `hub.setup=true`
+in the base configuration so loss of the state volume cannot enable anonymous
+access. Public binds are still refused unless explicitly allowed locally; use
+HTTPS, Tailscale or an SSH tunnel for remote access. HttpOnly sessions expire
+after 12 hours and are revoked on logout, restart or account changes.
+`server.token` remains a compatible device-administrator Bearer credential.
+Local password resets and offline account/settings repair preserve recovery
+evidence. See [browser authentication](docs/AUTH.md) and the
+[remaining feature checklist](docs/ROADMAP.md).
 
 AI callers can be given their own credentials (`[[hub.agents]]`). The credential
 decides the principal, so an agent cannot escape its restrictions by not
@@ -130,10 +155,13 @@ enabled per agent, and it cannot grant itself an approval.
 ## What it does not do
 
 No AI classification, face recognition or OCR. No video transcoding. No
-continuous library watching, no background loop. No moving, renaming or deleting
-originals, and no EXIF write-back. No cloud upload, sync or backup logic — the
-existing tools keep doing that, and this project yields to them rather than
-replacing them. No arbitrary shell, and no operation that accepts a server path.
+continuous photo-library watching; anime RSS polling is optional. Album indexing
+and anime archiving preserve originals; file management runs only explicit
+operator actions. No EXIF write-back. Cloud upload and cloud synchronization remain deferred. Local file backups and verified
+no-overwrite restores are documented in [`docs/BACKUPS.md`](docs/BACKUPS.md). Private
+service-state packages, offline restore and crash recovery are documented in
+[`docs/STATE-BACKUPS.md`](docs/STATE-BACKUPS.md). No arbitrary shell; HTTP file operations
+accept configured storage IDs and relative paths.
 
 ## License
 

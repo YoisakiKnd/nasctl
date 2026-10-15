@@ -11,8 +11,8 @@
 #     until somebody measures them on the machine, and docs/HUB-STAGE-B.md §7
 #     lists them.
 #
-# Every step below was reproduced by hand before being committed, so a failure
-# here means the code changed, not that the workflow was never known to pass.
+# Workflow definitions are not evidence of a completed run. Local verification
+# and remaining target-machine checks are recorded in docs/COMPLETION-PLAN.md.
 
 name: ci
 
@@ -257,9 +257,8 @@ jobs:
   # ---------------------------------------------------------------------------
   # The frontend, in a real DOM.
   #
-  # The page has no build step, so nothing compiles it and a mistake in it is not
-  # caught by `go build`. This job starts the console against a synthetic library
-  # and renders the real page with jsdom, checking that every view populates.
+  # Rebuild Svelte, verify committed assets, and render the real compiled bundle
+  # against a synthetic library. The target NAS still needs no Node runtime.
   #
   # It cannot check layout: jsdom has no layout engine. Appearance still needs a
   # real browser, and the harness says so in its own output.
@@ -267,7 +266,7 @@ jobs:
   frontend:
     name: frontend in a DOM
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -278,7 +277,15 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
+
+      - name: Build and check Svelte
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run check
+          npm run build
+          git diff --exit-code -- ../internal/hubweb/web
 
       - name: Install the harness dependency
         working-directory: scripts/uitest
@@ -290,10 +297,12 @@ jobs:
       - name: Build a fixture library and a configuration for it
         run: |
           go run ./internal/synth/cmdgen /tmp/lib
-          mkdir -p /tmp/hubstate
+          mkdir -p /tmp/hubstate /tmp/anime-downloads /tmp/anime-library
           cat > /tmp/hub.toml <<'EOF'
           [server]
           bind = "127.0.0.1:18090"
+          # Disposable CI credential; never used by a deployed device.
+          token = "nasctl-ci-fixture-operator"
 
           [paths]
           state_dir = "/tmp/hubstate"
@@ -301,10 +310,17 @@ jobs:
           [hub]
           bind = "127.0.0.1:18090"
 
+          [hub.anime]
+          enabled = true
+          qbittorrent_url = "http://127.0.0.1:18080"
+          download_dir = "/tmp/anime-downloads"
+          library_dir = "/tmp/anime-library"
+
           [[hub.storage]]
           id = "lib"
           label = "Library"
           path = "/tmp/lib"
+          writable = true
 
           [[collections]]
           code = "lib"
@@ -318,7 +334,7 @@ jobs:
           # Wait for readiness rather than sleeping a fixed time: a fixed sleep is
           # either slower than necessary or occasionally too short.
           for i in $(seq 1 50); do
-            if curl -sf -o /dev/null http://127.0.0.1:18090/api/v1/overview; then
+            if curl -sf -o /dev/null http://127.0.0.1:18090/api/v1/auth/status; then
               echo "console is up after ${i} attempts"
               exit 0
             fi
@@ -330,8 +346,255 @@ jobs:
 
       - name: Render the page
         working-directory: scripts/uitest
-        run: node render.mjs http://127.0.0.1:18090
+        run: node render.mjs http://127.0.0.1:18090 nasctl-ci-fixture-operator
+
+      - name: Browser login, logout and draft preservation
+        working-directory: scripts/uitest
+        run: node auth.mjs http://127.0.0.1:18090 nasctl-ci-fixture-operator
+
+      - name: Media playback controls and persistence
+        run: |
+          python3 scripts/uitest/seed-media.py /tmp/hubstate/anime.sqlite /tmp/anime-library --fixture-only
+          node scripts/uitest/media.mjs http://127.0.0.1:18090 nasctl-ci-fixture-operator
+
+      - name: Writable files, XHR upload, background copy/move and confirmed trash purge
+        run: node scripts/uitest/files.mjs http://127.0.0.1:18090 nasctl-ci-fixture-operator
+
+      - name: Finder navigation, tabs, pins, selection, menus and desktop search
+        run: node scripts/uitest/finder.mjs http://127.0.0.1:18090 nasctl-ci-fixture-operator
+
+      - name: Anime metadata selection and reversible subscription management
+        run: node scripts/uitest/anime-management.mjs http://127.0.0.1:18090 nasctl-ci-fixture-operator
+
+      - name: Desktop windows, drafts, geometry, mobile switching and session expiry
+        run: node scripts/uitest/desktop.mjs http://127.0.0.1:18090 nasctl-ci-fixture-operator
+
+      - name: Album browsing through two real services with generated fixtures
+        run: |
+          go build -o /tmp/albumctl ./cmd/albumctl
+          go run ./scripts/uitest/seed-album --fixture-only --root /tmp/nasctl-ci-album
+          /tmp/albumctl serve --config /tmp/nasctl-ci-album/album.toml > /tmp/album-fixture.log 2>&1 &
+          /tmp/nasctl serve --config /tmp/nasctl-ci-album/hub.toml > /tmp/album-console.log 2>&1 &
+          ready=0
+          for i in $(seq 1 50); do
+            if curl -sf -o /dev/null -H 'Authorization: Bearer nasctl-disposable-album-token' http://127.0.0.1:18095/api/v1/status && curl -sf -o /dev/null http://127.0.0.1:18096/api/v1/auth/status; then
+              ready=1
+              break
+            fi
+            sleep 0.2
+          done
+          test "$ready" = 1
+          node scripts/uitest/album.mjs http://127.0.0.1:18096
+
+      - name: Native album without a second HTTP service and real worker pause/resume
+        run: |
+          go run ./scripts/uitest/seed-album --fixture-only --root /tmp/nasctl-ci-native-album --hub-port 18099 --album-port 18100
+          /tmp/nasctl serve --config /tmp/nasctl-ci-native-album/native.toml > /tmp/native-album.log 2>&1 &
+          ready=0
+          for i in $(seq 1 50); do
+            if curl -sf -o /dev/null http://127.0.0.1:18099/api/v1/auth/status; then
+              ready=1
+              break
+            fi
+            sleep 0.2
+          done
+          test "$ready" = 1
+          node scripts/uitest/album.mjs http://127.0.0.1:18099
+          node scripts/uitest/album-native.mjs http://127.0.0.1:18099
+
+      - name: Single-download controls, metadata versions and bounded history cleanup
+        run: |
+          mkdir -p /tmp/nasctl-ci-control/state /tmp/nasctl-ci-control/cache /tmp/nasctl-ci-control/downloads /tmp/nasctl-ci-control/library
+          echo nasctl-ui-fixture-v1 > /tmp/nasctl-ci-control/.nasctl-ui-fixture
+          cat > /tmp/nasctl-ci-control/config.toml <<'EOF'
+          [server]
+          bind = "127.0.0.1:18101"
+          [paths]
+          state_dir = "/tmp/nasctl-ci-control/state"
+          cache_dir = "/tmp/nasctl-ci-control/cache"
+          [hub.anime]
+          enabled = true
+          qbittorrent_url = "http://127.0.0.1:18102"
+          download_dir = "/tmp/nasctl-ci-control/downloads"
+          qbittorrent_download_dir = "/downloads/anime"
+          library_dir = "/tmp/nasctl-ci-control/library"
+          [[hub.storage]]
+          id = "library"
+          path = "/tmp/nasctl-ci-control/library"
+          EOF
+          node scripts/uitest/downloader-fixture.mjs --fixture-only --port 18102 > /tmp/control-downloader.log 2>&1 &
+          /tmp/nasctl serve --config /tmp/nasctl-ci-control/config.toml > /tmp/control-console.log 2>&1 &
+          ready=0
+          for i in $(seq 1 50); do
+            if curl -sf -o /dev/null http://127.0.0.1:18101/api/v1/auth/status && curl -sf -o /dev/null http://127.0.0.1:18102/__test/stats; then
+              ready=1
+              break
+            fi
+            sleep 0.2
+          done
+          test "$ready" = 1
+          python3 - <<'PY'
+          import sqlite3
+          db=sqlite3.connect('/tmp/nasctl-ci-control/state/anime.sqlite')
+          db.execute("INSERT INTO subscriptions(id,title,feed_url,season,enabled,auto_download) VALUES(1,'Generated Control Fixture','https://example.com/rss',1,1,0)")
+          db.execute("INSERT INTO episodes(id,subscription_id,guid,title,url,number,season,state,hash,progress,updated_at,ever_submitted) VALUES(1,1,'generated-control','Generated Control Fixture - 01','https://example.com/fixture.torrent',1,1,'downloading',?,0.25,1,1)",('a'*40,))
+          db.commit()
+          db.close()
+          PY
+          node scripts/uitest/download-control.mjs http://127.0.0.1:18101 http://127.0.0.1:18102
+          python3 scripts/uitest/seed-metadata.py /tmp/nasctl-ci-control --fixture-only
+          node scripts/uitest/metadata.mjs http://127.0.0.1:18101
+          node scripts/uitest/history.mjs http://127.0.0.1:18101
 
       - name: Console log on failure
         if: failure()
-        run: cat /tmp/console.log
+        run: |
+          cat /tmp/console.log
+          test ! -f /tmp/album-fixture.log || cat /tmp/album-fixture.log
+          test ! -f /tmp/album-console.log || cat /tmp/album-console.log
+          test ! -f /tmp/native-album.log || cat /tmp/native-album.log
+          test ! -f /tmp/control-console.log || cat /tmp/control-console.log
+
+      - name: Bounded Finder multiselect, conflict continuation, trash and restore
+        run: |
+          node scripts/uitest/cli-files.mjs /tmp/nasctl
+          node scripts/uitest/cli-state.mjs /tmp/nasctl
+          python3 scripts/uitest/seed-batch.py /tmp/nasctl-ci-batch --fixture-only
+          /tmp/nasctl --config /tmp/nasctl-ci-batch/config.toml serve > /tmp/batch-console.log 2>&1 &
+          batch_pid=$!
+          trap 'kill "$batch_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 50); do
+            if curl -sf -o /dev/null http://127.0.0.1:18103/api/v1/auth/status; then
+              ready=1
+              break
+            fi
+            sleep 0.2
+          done
+          test "$ready" = 1
+          node scripts/uitest/batch.mjs http://127.0.0.1:18103
+          node scripts/uitest/batch-history.mjs http://127.0.0.1:18103
+
+      - name: Batch console log on failure
+        if: failure()
+        run: |
+          test ! -f /tmp/batch-console.log || cat /tmp/batch-console.log
+
+      - name: Native local backup, verified restore, conflicts and exact-ID cleanup
+        run: |
+          python3 scripts/uitest/seed-backup.py /tmp/nasctl-ci-backup --fixture-only
+          /tmp/nasctl --config /tmp/nasctl-ci-backup/config.toml serve > /tmp/backup-console.log 2>&1 &
+          backup_pid=$!
+          trap 'kill "$backup_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 50); do
+            if curl -sf -o /dev/null http://127.0.0.1:18104/api/v1/auth/status; then
+              ready=1
+              break
+            fi
+            sleep 0.2
+          done
+          test "$ready" = 1
+          node scripts/uitest/backup.mjs http://127.0.0.1:18104
+
+      - name: Unified settings workflow with generated private data
+        run: |
+          set -eu
+          python3 scripts/uitest/seed-settings.py /tmp/nasctl-ci-settings --fixture-only
+          /tmp/nasctl serve --config /tmp/nasctl-ci-settings/config.toml >/tmp/nasctl-ci-settings/server.log 2>&1 &
+          settings_pid=$!
+          trap 'kill "$settings_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 100); do
+            if curl -fsS http://127.0.0.1:18105/api/v1/settings >/dev/null; then break; fi
+            sleep 0.1
+          done
+          node scripts/uitest/settings.mjs http://127.0.0.1:18105
+          kill "$settings_pid"
+          wait "$settings_pid" || true
+          /tmp/nasctl serve --config /tmp/nasctl-ci-settings/config.toml >>/tmp/nasctl-ci-settings/server.log 2>&1 &
+          settings_pid=$!
+          for attempt in $(seq 1 100); do
+            if curl -fsS http://127.0.0.1:18105/api/v1/settings >/dev/null; then break; fi
+            sleep 0.1
+          done
+          node scripts/uitest/settings-restart.mjs http://127.0.0.1:18105
+
+      - name: Settings console log on failure
+        if: failure()
+        run: test ! -f /tmp/nasctl-ci-settings/server.log || cat /tmp/nasctl-ci-settings/server.log
+
+      - name: Local account CLI and corrupt-state recovery
+        run: node scripts/uitest/cli-users.mjs /tmp/nasctl
+
+      - name: Native album under delegated systemd and kernel memory limits
+        run: ./scripts/verify-native-album-linux.sh --fixture-only /tmp
+
+      - name: First setup, roles and account persistence
+        run: |
+          set -eu
+          accounts_fixture="$(node scripts/uitest/seed-accounts.mjs /tmp/nasctl 18107)"
+          /tmp/nasctl serve --config "$accounts_fixture/config.toml" >/tmp/nasctl-ci-accounts.log 2>&1 &
+          accounts_pid=$!
+          trap 'kill "$accounts_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 100); do
+            if curl -fsS http://127.0.0.1:18107/api/v1/auth/status >/dev/null; then break; fi
+            sleep 0.1
+          done
+          node scripts/uitest/accounts.mjs "$accounts_fixture"
+          kill "$accounts_pid"
+          wait "$accounts_pid" || true
+          /tmp/nasctl serve --config "$accounts_fixture/config.toml" >>/tmp/nasctl-ci-accounts.log 2>&1 &
+          accounts_pid=$!
+          for attempt in $(seq 1 100); do
+            if curl -fsS http://127.0.0.1:18107/api/v1/auth/status >/dev/null; then break; fi
+            sleep 0.1
+          done
+          node scripts/uitest/accounts-restart.mjs "$accounts_fixture"
+
+      - name: Account console log on failure
+        if: failure()
+        run: test ! -f /tmp/nasctl-ci-accounts.log || cat /tmp/nasctl-ci-accounts.log
+
+      - name: Backup console log on failure
+        if: failure()
+        run: |
+          test ! -f /tmp/backup-console.log || cat /tmp/backup-console.log
+
+  delivery:
+    name: Linux package (${{ matrix.arch }})
+    needs: [test, race, armv7, frontend]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64, armv7]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: Package matched binaries, configuration and deployment docs
+        env:
+          NASCTL_ARCH: ${{ matrix.arch }}
+        run: bash scripts/package-linux.sh "$NASCTL_ARCH"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nasctl-linux-${{ matrix.arch }}
+          path: |
+            dist/nasctl-linux-${{ matrix.arch }}.tar.gz
+            dist/nasctl-linux-${{ matrix.arch }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30
+      - name: Delivery summary
+        env:
+          NASCTL_ARCH: ${{ matrix.arch }}
+        run: |
+          {
+            echo "### Linux $NASCTL_ARCH"
+            echo 'Matched nasctl + albumctl, configuration example, systemd unit and deployment docs.'
+            echo 'Download the artifact above; verify its .tar.gz.sha256 before extracting.'
+            echo 'This is a development build; installing on a NAS remains a separate step.'
+            cat "dist/nasctl-linux-$NASCTL_ARCH.tar.gz.sha256"
+          } >> "$GITHUB_STEP_SUMMARY"

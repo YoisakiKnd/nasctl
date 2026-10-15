@@ -1,0 +1,50 @@
+go version go1.27.1 linux/arm64
+Linux aarch64
+?   	github.com/YoisakiKnd/nasctl/cmd/albumctl	[no test files]
+?   	github.com/YoisakiKnd/nasctl/cmd/nasctl	[no test files]
+?   	github.com/YoisakiKnd/nasctl/internal/accounts	[no test files]
+ok  	github.com/YoisakiKnd/nasctl/internal/accountslocal	36.690s
+ok  	github.com/YoisakiKnd/nasctl/internal/album	1.125s
+ok  	github.com/YoisakiKnd/nasctl/internal/albumlocal	1.326s
+ok  	github.com/YoisakiKnd/nasctl/internal/anime	5.018s
+ok  	github.com/YoisakiKnd/nasctl/internal/backupgate	1.120s
+ok  	github.com/YoisakiKnd/nasctl/internal/backuplocal	1.144s
+?   	github.com/YoisakiKnd/nasctl/internal/backups	[no test files]
+?   	github.com/YoisakiKnd/nasctl/internal/buildinfo	[no test files]
+ok  	github.com/YoisakiKnd/nasctl/internal/cachepath	1.028s
+?   	github.com/YoisakiKnd/nasctl/internal/cli	[no test files]
+ok  	github.com/YoisakiKnd/nasctl/internal/config	1.077s
+ok  	github.com/YoisakiKnd/nasctl/internal/dbsnapshot	1.217s
+ok  	github.com/YoisakiKnd/nasctl/internal/domain	1.011s
+ok  	github.com/YoisakiKnd/nasctl/internal/e2e	149.545s
+ok  	github.com/YoisakiKnd/nasctl/internal/exif	31.174s
+ok  	github.com/YoisakiKnd/nasctl/internal/files	1.164s
+ok  	github.com/YoisakiKnd/nasctl/internal/fsutil	1.020s
+ok  	github.com/YoisakiKnd/nasctl/internal/hubops	1.016s
+ok  	github.com/YoisakiKnd/nasctl/internal/hubstore	15.659s
+ok  	github.com/YoisakiKnd/nasctl/internal/hubweb	51.879s
+ok  	github.com/YoisakiKnd/nasctl/internal/jobs	2.042s
+ok  	github.com/YoisakiKnd/nasctl/internal/launchgate	1.059s
+ok  	github.com/YoisakiKnd/nasctl/internal/localrepair	1.020s
+?   	github.com/YoisakiKnd/nasctl/internal/logx	[no test files]
+ok  	github.com/YoisakiKnd/nasctl/internal/mimetype	1.014s
+ok  	github.com/YoisakiKnd/nasctl/internal/nasctl	12.022s
+?   	github.com/YoisakiKnd/nasctl/internal/operations	[no test files]
+ok  	github.com/YoisakiKnd/nasctl/internal/placeholder	1.013s
+ok  	github.com/YoisakiKnd/nasctl/internal/probe	35.878s
+ok  	github.com/YoisakiKnd/nasctl/internal/resource	1.362s
+ok  	github.com/YoisakiKnd/nasctl/internal/scan	1.166s
+ok  	github.com/YoisakiKnd/nasctl/internal/server	1.048s
+?   	github.com/YoisakiKnd/nasctl/internal/settings	[no test files]
+ok  	github.com/YoisakiKnd/nasctl/internal/settingslocal	1.030s
+ok  	github.com/YoisakiKnd/nasctl/internal/source	1.017s
+ok  	github.com/YoisakiKnd/nasctl/internal/statebackup	12.834s
+ok  	github.com/YoisakiKnd/nasctl/internal/statelease	6.117s
+ok  	github.com/YoisakiKnd/nasctl/internal/store	4.658s
+ok  	github.com/YoisakiKnd/nasctl/internal/suzu	1.321s
+ok  	github.com/YoisakiKnd/nasctl/internal/synth	6.793s
+?   	github.com/YoisakiKnd/nasctl/internal/synth/cmdgen	[no test files]
+ok  	github.com/YoisakiKnd/nasctl/internal/taskctl	1.020s
+ok  	github.com/YoisakiKnd/nasctl/internal/thumbs	81.917s
+ok  	github.com/YoisakiKnd/nasctl/internal/webstate	1.175s
+?   	github.com/YoisakiKnd/nasctl/scripts/uitest/seed-album	[no test files]

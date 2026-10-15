@@ -1,11 +1,11 @@
 package hubweb
 
 import (
+	"crypto/sha256"
 	"embed"
-	"io"
+	"fmt"
 	"net/http"
 	"strings"
-	"time"
 )
 
 // The front end is embedded in the binary. There is no front-end toolchain on the
@@ -72,33 +72,20 @@ func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request, key string) 
 		http.NotFound(w, r)
 		return
 	}
-	f, err := assets.Open(info.path)
+	body, err := assets.ReadFile(info.path)
 	if err != nil {
 		s.fail(w, http.StatusInternalServerError, "internal_error", err)
 		return
 	}
-	defer f.Close()
-
-	st, err := f.Stat()
-	if err != nil {
-		s.fail(w, http.StatusInternalServerError, "internal_error", err)
-		return
-	}
-
 	w.Header().Set("Content-Type", info.contentType)
-	// The shell is never cached, so that a new binary's UI is picked up on the
-	// next load rather than after a hard refresh the operator has to know about.
-	// The stylesheet and script are content-stable within a build.
-	if key == "/" || key == "/index.html" {
-		w.Header().Set("Cache-Control", "no-cache")
-	} else {
-		w.Header().Set("Cache-Control", "public, max-age=3600")
-	}
-	// Last-Modified lets a browser revalidate cheaply instead of re-downloading.
-	w.Header().Set("Last-Modified", st.ModTime().UTC().Format(http.TimeFormat))
-
-	if ims := r.Header.Get("If-Modified-Since"); ims != "" {
-		if t, err := http.ParseTime(ims); err == nil && !st.ModTime().After(t.Add(time.Second)) {
+	// Embedded files have zero modification times. A timestamp validator would
+	// incorrectly keep an older binary's UI forever. Revalidate all three assets
+	// by content so an upgrade also picks up the matching script and stylesheet.
+	w.Header().Set("Cache-Control", "no-cache")
+	etag := fmt.Sprintf(`"%x"`, sha256.Sum256(body))
+	w.Header().Set("ETag", etag)
+	for _, tag := range strings.Split(r.Header.Get("If-None-Match"), ",") {
+		if strings.TrimPrefix(strings.TrimSpace(tag), "W/") == etag || strings.TrimSpace(tag) == "*" {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
@@ -108,5 +95,5 @@ func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request, key string) 
 	if r.Method == http.MethodHead {
 		return
 	}
-	_, _ = io.Copy(w, f)
+	_, _ = w.Write(body)
 }

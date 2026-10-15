@@ -366,6 +366,8 @@ func Default() Config {
 		// without reading it, and it means a hub key left out cannot widen what
 		// the console may touch.
 		Hub: Hub{
+			Files: DefaultFileLimits(),
+			Anime: Anime{PollIntervalSeconds: 900, MaxItemsPerFeed: 200, QBittorrentURL: "http://127.0.0.1:8080"},
 			// Agents defaults to empty: no agent has a credential, so none can
 			// authenticate. An operator adds one deliberately.
 			Agents: nil,
@@ -658,8 +660,8 @@ func (c *Config) Finalize() error {
 	}
 
 	// ---- collections ----
-	if len(c.Collections) == 0 {
-		fail("at least one [[collections]] entry is required")
+	if len(c.Collections) == 0 && !c.Hub.Anime.Enabled && len(c.Hub.Storage) == 0 && c.Hub.Album.APIBase == "" && !c.Hub.Setup {
+		fail("at least one collection, storage root, album connection, or enabled native anime module is required")
 	}
 	seen := map[string]bool{}
 	for i := range c.Collections {
@@ -719,6 +721,7 @@ func (c *Config) Finalize() error {
 
 	// ---- hub ----
 	c.finalizeHub(fail)
+	c.finalizeAlbum(fail)
 
 	// ---- unknown keys ----
 	// Refusing an unrecognised key is deliberate. In this file most numbers are

@@ -1,0 +1,67 @@
+// Media event simulation in the real Svelte bundle, against real Go state.
+// This covers controls/persistence; codec playback requires a real browser.
+import { JSDOM, VirtualConsole } from 'jsdom';
+const base=process.argv[2]||'http://127.0.0.1:18092', token=process.argv[3]||'';
+const headers=token?{Authorization:`Bearer ${token}`}:{}, errors=[];
+const vc=new VirtualConsole();vc.on('jsdomError',(error)=>errors.push(error.message));
+const dom=new JSDOM(await(await fetch(base+'/',{headers})).text(),{url:base+'/#media',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:vc});
+const w=dom.window,d=w.document;
+const check=(ok,label)=>{if(!ok)throw new Error(label);console.log('ok:',label);};
+const delay=(ms)=>new Promise((resolve)=>setTimeout(resolve,ms));
+async function wait(test,label){const until=Date.now()+6000;while(Date.now()<until){if(test())return;await delay(25);}throw new Error('timed out: '+label);}
+const text=(selector)=>d.querySelector(selector)?.textContent||'';
+const button=(label)=>[...d.querySelectorAll('button')].find((item)=>item.textContent.trim()===label);
+const request=async(path,init={})=>fetch(new URL(path,base),{...init,headers:{...init.headers,...headers}});
+let failProgress=false;
+w.fetch=(path,init={})=>failProgress&&init.method==='PUT'&&String(path).endsWith('/playback')?Promise.resolve(new Response(JSON.stringify({error:'fixture_unavailable',message:'测试保存失败'}),{status:503})):request(path,init);
+w.AbortController=AbortController;
+w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
+w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};
+w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
+Object.defineProperty(w.HTMLMediaElement.prototype,'duration',{get(){return 20;}});
+const tracks=new WeakMap();
+Object.defineProperty(w.HTMLMediaElement.prototype,'textTracks',{get(){if(!tracks.has(this))tracks.set(this,[{mode:'disabled'}]);return tracks.get(this);}});
+try{
+  const rows=(await(await request('/api/v1/anime/episodes?state=archived')).json()).episodes;
+  const fixture=rows.find((item)=>item.series==='Media Fixture');check(fixture,'archived test episode exists');
+  const endpoint=`/api/v1/anime/episodes/${fixture.id}/playback`;
+  await request(endpoint,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({position:5,duration:20,watched:false})});
+  w.eval(await(await request('/app.js')).text());
+  await wait(()=>d.querySelector('.subscription-card img'),'real poster endpoint is used');
+  check(d.querySelector('.subscription-card img').getAttribute('src').includes('/poster'),'poster is served from the NAS');
+  button('剧集与媒体库').click();
+  await wait(()=>button('继续观看'),'resume action');button('继续观看').click();
+  await wait(()=>d.querySelector('dialog video'),'player metadata');
+  const video=d.querySelector('video');video.dispatchEvent(new w.Event('loadedmetadata'));
+  check(video.currentTime===5,'player restores the persisted playback position');
+  const select=d.querySelector('.player-subtitles select');check(select,'subtitle selector exists');
+  check(![...select.options].some((item)=>item.value.endsWith('.ass')),'ASS is download-only');
+  select.value=[...select.options].find((item)=>item.value.endsWith('.srt')).value;
+  select.dispatchEvent(new w.Event('change',{bubbles:true}));await delay(0);
+  check(video.textTracks[0].mode==='showing','selecting subtitles enables the text track before load');
+  const track=d.querySelector('video track');const converted=await request(track.getAttribute('src'));
+  check(converted.ok&&(await converted.text()).startsWith('WEBVTT'),'selected SRT uses real VTT conversion');
+  video.currentTime=8;video.dispatchEvent(new w.Event('pause'));
+  await wait(()=>text('dialog').includes('0:08'),'pause saves progress');
+  let state=await(await request(endpoint)).json();check(state.episode.watch_position===8,'pause is persisted in SQLite');
+  failProgress=true;video.currentTime=9;button('关闭播放器').click();
+  await wait(()=>text('dialog [role="alert"]').includes('未保存'),'failed final save is visible');
+  check(d.querySelector('dialog'),'failed save does not silently dismiss the player');
+  button('放弃本次进度并关闭').click();await wait(()=>!d.querySelector('dialog'),'explicit discard closes player');
+  failProgress=false;await wait(()=>button('继续观看'),'resume after failed save');button('继续观看').click();
+  await wait(()=>d.querySelector('video'),'second player');
+  const resumed=d.querySelector('video');resumed.dispatchEvent(new w.Event('loadedmetadata'));
+  check(resumed.currentTime===8,'failed save preserves the last confirmed position');
+  resumed.currentTime=19.3;resumed.dispatchEvent(new w.Event('ended'));
+  await wait(()=>text('dialog').includes('已看完'),'completion is reported');
+  button('关闭播放器').click();await wait(()=>!d.querySelector('dialog'),'player closes after save');
+  await wait(()=>button('标记未看'),'watched state refreshes in the library');
+  button('标记未看').click();await wait(()=>button('标记看完')&&!button('标记看完').disabled,'reset state');
+  state=await(await request(endpoint)).json();check(!state.episode.watched&&state.episode.watch_position===0,'mark-unwatched resets progress');
+  const filter=d.querySelector('select[aria-label="观看状态"]');filter.value='watched';filter.dispatchEvent(new w.Event('change',{bubbles:true}));
+  await wait(()=>text('.episode-panel').includes('这里还没有剧集'),'watched filter excludes reset episode');
+  filter.value='unwatched';filter.dispatchEvent(new w.Event('change',{bubbles:true}));
+  await wait(()=>button('标记看完'),'unwatched filter restores episode');
+  check(errors.length===0,'no DOM errors: '+errors.join('; '));
+  console.log('Media controls and persisted playback flows passed; codec playback requires separate browser verification.');
+}finally{dom.window.close();}
