@@ -70,7 +70,8 @@ func (m *Manager) ConsumeSealed(ctx context.Context, rootID, rel string, size, m
 	if e != nil {
 		return e
 	}
-	if hex.EncodeToString(hash.Sum(nil)) != digest || after.Size() != before.Size() || after.ModTime() != before.ModTime() {
+	afterStat, statOK := after.Sys().(*syscall.Stat_t)
+	if !statOK || afterStat.Nlink != 1 || hex.EncodeToString(hash.Sum(nil)) != digest || after.Size() != before.Size() || after.ModTime() != before.ModTime() {
 		return ErrSourceChanged
 	}
 	// Reopen through the pinned parent and compare identity immediately before unlink.
@@ -81,7 +82,11 @@ func (m *Manager) ConsumeSealed(ctx context.Context, rootID, rel string, size, m
 	check := os.NewFile(uintptr(checkFD), name)
 	current, e := check.Stat()
 	check.Close()
-	if e != nil || !os.SameFile(before, current) {
+	if e != nil || !os.SameFile(before, current) || current.Size() != before.Size() || current.ModTime() != before.ModTime() {
+		return ErrSourceChanged
+	}
+	currentStat, statOK := current.Sys().(*syscall.Stat_t)
+	if !statOK || currentStat.Nlink != 1 {
 		return ErrSourceChanged
 	}
 	if e = ctx.Err(); e != nil {

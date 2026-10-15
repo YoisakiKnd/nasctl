@@ -42,6 +42,18 @@ func TestSealRefusesLinksReadonlyChangedAndFailedEncryption(t *testing.T) {
 	e = fm.ConsumeSealed(ctx, "data", "photo.jpg", 5, info.ModTime().UnixNano(), func(f *os.File) (string, error) {
 		b, _ := io.ReadAll(f)
 		hash := sha256.Sum256(b)
+		if e := os.Link(source, filepath.Join(root, "late-link.jpg")); e != nil {
+			t.Fatal(e)
+		}
+		return hex.EncodeToString(hash[:]), nil
+	}, "")
+	if !errors.Is(e, ErrSourceChanged) {
+		t.Fatal("hardlink created during sealing was accepted", e)
+	}
+	os.Remove(filepath.Join(root, "late-link.jpg"))
+	e = fm.ConsumeSealed(ctx, "data", "photo.jpg", 5, info.ModTime().UnixNano(), func(f *os.File) (string, error) {
+		b, _ := io.ReadAll(f)
+		hash := sha256.Sum256(b)
 		os.WriteFile(source, []byte("CHANGED"), 0600)
 		return hex.EncodeToString(hash[:]), nil
 	}, "")
