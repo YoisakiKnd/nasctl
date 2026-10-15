@@ -13,7 +13,9 @@ func TestAuditBurstCannotGrowPastRowCapWithinRetentionDay(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer s.Close()
-	ctx, stop := context.WithTimeout(context.Background(), 30*time.Second)
+	// This verifies the row bound, not insertion speed. SQLite's race
+	// instrumentation and shared CI CPUs can make the 100005-row fixture slow.
+	ctx, stop := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer stop()
 	_, e = s.db.ExecContext(ctx, `WITH RECURSIVE fixture(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM fixture WHERE n<?)
  INSERT INTO audit(at,principal,action,outcome) SELECT ?, 'fixture', 'read', 'ok' FROM fixture`, MaxAuditRows+5, time.Now().Unix())

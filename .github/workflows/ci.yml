@@ -118,7 +118,8 @@ jobs:
       - name: Test with the race detector
         env:
           CGO_ENABLED: "1"
-        run: go test -race -count=1 ./...
+          GOMAXPROCS: "2"
+        run: go test -race -count=1 -p=1 ./...
 
   # ---------------------------------------------------------------------------
   # The ARMv7 artefacts, and the two properties the deliverable promises about
@@ -297,6 +298,7 @@ jobs:
       - name: Build a fixture library and a configuration for it
         run: |
           go run ./internal/synth/cmdgen /tmp/lib
+          printf 'generated root-level Finder preview\n' > /tmp/lib/finder-preview.txt
           mkdir -p /tmp/hubstate /tmp/anime-downloads /tmp/anime-library
           cat > /tmp/hub.toml <<'EOF'
           [server]
