@@ -108,10 +108,11 @@ jobs:
             echo "$output"
             [[ "$output" == "$program $RELEASE_VERSION ("* ]]
             [[ "$output" != *"-dev"* ]]
-            metadata="$(go version -m "/tmp/nasctl-release-check/nasctl-linux-amd64/$program")"
-            [[ "$metadata" == *"internal/buildinfo.Version=$RELEASE_VERSION "* ]]
-            [[ "$metadata" == *"internal/buildinfo.Commit=$SOURCE_COMMIT "* ]]
+            if [[ "$program" == albumctl ]]; then
+              [[ "$output" == *" (commit $SOURCE_COMMIT,"* ]]
+            fi
           done
+          grep -Fx "source commit: $SOURCE_COMMIT" /tmp/nasctl-release-check/nasctl-linux-amd64/BUILD.txt
       - uses: actions/upload-artifact@v4
         with:
           name: release-linux-${{ matrix.arch }}
