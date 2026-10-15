@@ -7,6 +7,10 @@ on:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: "Existing version tag to build or retry (optional for dry runs)"
+        type: string
+        default: ""
       dry_run:
         description: "Build artifacts only; publishing requires a version-tag ref"
         type: boolean
@@ -16,7 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
   cancel-in-progress: false
 
 env:
@@ -32,30 +36,39 @@ jobs:
       actions: read
     outputs:
       version: ${{ steps.version.outputs.version }}
+      commit: ${{ steps.version.outputs.commit }}
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
       - name: Validate release version and ref
         id: version
         env:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+          RELEASE_TAG: ${{ inputs.release_tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
         run: |
           version="$(cat VERSION)"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           test -f "docs/releases/v$version.md"
-          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
-            test "$GITHUB_REF_NAME" = "v$version"
+          if [[ -n "$RELEASE_TAG" ]]; then
+            test "$RELEASE_TAG" = "v$version"
+            test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{}")"
           elif [[ "$DRY_RUN" != true ]]; then
             echo 'Publishing requires a version-tag ref.' >&2
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
       - name: Require successful CI for this exact commit on main
         env:
           GH_TOKEN: ${{ github.token }}
+          SOURCE_COMMIT: ${{ steps.version.outputs.commit }}
         run: |
-          passed_sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&status=completed&per_page=100" \
+          passed_sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SOURCE_COMMIT&status=completed&per_page=100" \
             --jq '[.workflow_runs[] | select(.head_branch == "main" and .event == "push" and .conclusion == "success")][0].head_sha // ""')"
-          if [[ "$passed_sha" != "$GITHUB_SHA" ]]; then
+          if [[ "$passed_sha" != "$SOURCE_COMMIT" ]]; then
             echo 'Run CI successfully on main for this exact commit before releasing.' >&2
             exit 1
           fi
@@ -71,6 +84,8 @@ jobs:
         arch: [amd64, arm64, armv7]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.commit }}
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -84,14 +99,18 @@ jobs:
         if: matrix.arch == 'amd64'
         env:
           RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+          SOURCE_COMMIT: ${{ needs.verify.outputs.commit }}
         run: |
           mkdir -p /tmp/nasctl-release-check
           tar -xzf dist/nasctl-linux-amd64.tar.gz -C /tmp/nasctl-release-check
           for program in nasctl albumctl; do
             output="$(/tmp/nasctl-release-check/nasctl-linux-amd64/$program version)"
             echo "$output"
-            [[ "$output" == *" $RELEASE_VERSION (commit $GITHUB_SHA,"* ]]
+            [[ "$output" == "$program $RELEASE_VERSION ("* ]]
             [[ "$output" != *"-dev"* ]]
+            metadata="$(go version -m "/tmp/nasctl-release-check/nasctl-linux-amd64/$program")"
+            [[ "$metadata" == *"internal/buildinfo.Version=$RELEASE_VERSION "* ]]
+            [[ "$metadata" == *"internal/buildinfo.Commit=$SOURCE_COMMIT "* ]]
           done
       - uses: actions/upload-artifact@v4
         with:
@@ -105,13 +124,15 @@ jobs:
   publish:
     name: Publish complete release
     needs: [verify, build]
-    if: github.ref_type == 'tag' && (github.event_name == 'push' || !inputs.dry_run)
+    if: needs.verify.outputs.tag != '' && (github.event_name == 'push' || !inputs.dry_run)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.commit }}
       - uses: actions/download-artifact@v4
         with:
           pattern: release-linux-*
@@ -129,20 +150,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+          RELEASE_TAG: ${{ needs.verify.outputs.tag }}
         run: |
-          if draft="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)"; then
+          if draft="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)"; then
             test "$draft" = true
           else
-            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
               --title "nasctl v$RELEASE_VERSION" --notes-file "docs/releases/v$RELEASE_VERSION.md"
           fi
-          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" dist/*.tar.gz dist/*.sha256 dist/SHA256SUMS --clobber
+          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" dist/*.tar.gz dist/*.sha256 dist/SHA256SUMS --clobber
           mkdir -p /tmp/nasctl-release-download
-          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir /tmp/nasctl-release-download
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir /tmp/nasctl-release-download
           cd /tmp/nasctl-release-download
           sha256sum -c SHA256SUMS
           cmp SHA256SUMS "$GITHUB_WORKSPACE/dist/SHA256SUMS"
       - name: Publish verified assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
