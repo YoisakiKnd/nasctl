@@ -48,7 +48,7 @@ done
 cp configs/albumctl.example.toml "$nasctl_package/configs/"
 cp systemd/nasctl-web.service "$nasctl_package/systemd/"
 cp LICENSE "$nasctl_package/"
-for nasctl_doc in DEPLOYMENT AUTH ALBUM ANIME FILES MEDIA BACKUPS STATE-BACKUPS SETTINGS; do
+for nasctl_doc in DEPLOYMENT AUTH ALBUM ANIME FILES MEDIA BACKUPS STATE-BACKUPS SETTINGS PHOTO-VAULT; do
   cp "docs/$nasctl_doc.md" "$nasctl_package/docs/"
 done
 {
