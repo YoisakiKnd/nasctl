@@ -19,6 +19,7 @@ const MaxPhotoBytes int64 = 64 << 20
 
 var ErrInvalid = errors.New("保险箱数据无效或已损坏")
 var ErrLocked = errors.New("请先输入保险箱密码解锁")
+var ErrSyncPending = errors.New("保险箱设置已发布，但磁盘同步未确认")
 var ErrBusy = errors.New("保险箱正在处理，请稍后重试")
 
 // Every chunk authenticates its position, file identity and complete length.

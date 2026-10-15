@@ -36,7 +36,7 @@
       if (operation === 'create') message = '保险箱已创建，请输入独立密码解锁。';
       if (operation === 'password') {clearPrivate(); message = '密码已修改，所有保险箱会话已锁定。';}
       await refresh();
-    } catch (failure) {error = failure.message;} finally {pending = false;}
+    } catch (failure) {error = failure.message; if (failure.code === 'vault_sync_pending') {changing = false; password = ''; repeat = ''; newPassword = ''; await refresh();}} finally {pending = false;}
   }
   async function move(id) {
     if (pending || readOnly) return; pending = true; error = ''; message = '';

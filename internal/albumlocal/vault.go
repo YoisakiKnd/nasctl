@@ -164,6 +164,9 @@ func (c *Control) MoveToVault(ctx context.Context, vault *photovault.Store, toke
 				}
 			}
 		}
+		if e = dir.Sync(); e != nil {
+			return vaultID, e
+		}
 	} else if !os.IsNotExist(e) {
 		return vaultID, e
 	}

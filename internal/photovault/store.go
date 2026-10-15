@@ -68,12 +68,13 @@ type session struct {
 	expires time.Time
 }
 type Store struct {
-	mu       sync.Mutex
-	root     *os.Root
-	lease    *statelease.Lease
-	doc      document
-	sessions map[[32]byte]*session
-	kdf      chan struct{}
+	mu            sync.Mutex
+	root          *os.Root
+	lease         *statelease.Lease
+	doc           document
+	sessions      map[[32]byte]*session
+	kdf           chan struct{}
+	syncDirectory func() error
 }
 type Mover interface {
 	MoveToVault(context.Context, *Store, string, string, int64, album.Details) (string, error)
@@ -182,6 +183,9 @@ func (s *Store) read(name string, limit int64) ([]byte, error) {
 	return b, e
 }
 func (s *Store) syncDir() error {
+	if s.syncDirectory != nil {
+		return s.syncDirectory()
+	}
 	f, e := s.root.Open(".")
 	if e != nil {
 		return e
@@ -189,15 +193,18 @@ func (s *Store) syncDir() error {
 	defer f.Close()
 	return f.Sync()
 }
-func (s *Store) atomic(name string, b []byte) error {
+
+// Report publication separately: a directory fsync can fail after rename.
+// In that case retaining ciphertext and the new in-memory index is essential.
+func (s *Store) atomic(name string, b []byte) (bool, error) {
 	id, e := randomID()
 	if e != nil {
-		return e
+		return false, e
 	}
 	temp := ".tmp-" + id
 	f, e := s.root.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0600)
 	if e != nil {
-		return e
+		return false, e
 	}
 	defer s.root.Remove(temp)
 	if _, e = f.Write(b); e == nil {
@@ -207,21 +214,25 @@ func (s *Store) atomic(name string, b []byte) error {
 	if e == nil {
 		e = ce
 	}
-	if e == nil {
-		e = s.root.Rename(temp, name)
+	if e != nil {
+		return false, e
 	}
-	if e == nil {
-		e = s.syncDir()
+	if e = s.root.Rename(temp, name); e != nil {
+		return false, e
 	}
-	return e
+	return true, s.syncDir()
 }
 func (s *Store) save(next document) error {
 	b, e := json.Marshal(next)
 	if e != nil {
 		return e
 	}
-	if e = s.atomic("vault.json", b); e == nil {
+	published, e := s.atomic("vault.json", b)
+	if published {
 		s.doc = next
+		if e != nil {
+			return errors.Join(ErrSyncPending, e)
+		}
 	}
 	return e
 }
@@ -383,14 +394,14 @@ func (s *Store) ChangePassword(token, owner, old, next string) error {
 	d := s.doc
 	d.Salt = salt
 	d.Wrapped = wrapped
-	if e = s.save(d); e != nil {
-		return e
+	e = s.save(d)
+	if s.doc.Wrapped == wrapped {
+		for _, v := range s.sessions {
+			clear(v.key)
+		}
+		clear(s.sessions)
 	}
-	for _, v := range s.sessions {
-		clear(v.key)
-	}
-	clear(s.sessions)
-	return nil
+	return e
 }
 func (s *Store) key(token, owner string) ([]byte, error) {
 	s.mu.Lock()
@@ -626,10 +637,19 @@ func (s *Store) Put(ctx context.Context, token, owner string, record Record, sou
 	}
 	next := s.doc
 	next.Objects = append(append([]object{}, next.Objects...), object{ID: id, SourceID: record.Details.Item.ID, Pending: true})
-	if e = s.save(next); e != nil {
+	e = s.save(next)
+	for _, o := range s.doc.Objects {
+		if o.ID == id {
+			published = true
+			break
+		}
+	}
+	if e != nil {
+		if published {
+			return id, digest, e
+		}
 		return "", "", e
 	}
-	published = true
 	return id, digest, nil
 }
 func (s *Store) Complete(token, owner, id string) error {

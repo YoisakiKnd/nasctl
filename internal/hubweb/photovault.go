@@ -47,6 +47,8 @@ func (s *Server) vaultAccess(w http.ResponseWriter, r *http.Request) bool {
 }
 func (s *Server) vaultError(w http.ResponseWriter, e error) {
 	switch {
+	case errors.Is(e, photovault.ErrSyncPending):
+		writeError(w, 409, "vault_sync_pending", "设置已写入，但磁盘同步未确认。请检查存储，并使用新设置的密码重新解锁。")
 	case errors.Is(e, photovault.ErrLocked):
 		writeError(w, 403, "vault_locked", "保险箱已锁定或密码不正确，请重新解锁")
 	case errors.Is(e, photovault.ErrBusy):

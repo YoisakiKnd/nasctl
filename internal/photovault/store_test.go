@@ -203,3 +203,48 @@ func TestVaultRejectsNamespaceSymlinks(t *testing.T) {
 		t.Fatal("adopted linked vault")
 	}
 }
+
+func TestPublishedIndexSyncFailureKeepsCiphertextAndRevokesRotatedSessions(t *testing.T) {
+	s, token, password, state := vaultRig(t)
+	failure := errors.New("simulated directory sync failure")
+	calls := 0
+	// First sync publishes payloads; second is after the index rename.
+	s.syncDirectory = func() error {
+		calls++
+		if calls == 2 {
+			return failure
+		}
+		return nil
+	}
+	body := []byte("original survives publication sync failure")
+	record := Record{Details: album.Details{Item: album.Item{ID: 9, Name: "private.jpg", Kind: "image", MIME: "image/jpeg", Bytes: int64(len(body))}}, ThumbMIME: "image/jpeg"}
+	id, _, e := s.Put(context.Background(), token, "owner", record, bytes.NewReader(body), []byte("thumb"))
+	if !errors.Is(e, failure) || id == "" || !s.Protected(9) {
+		t.Fatal("published partial state not retained", id, e)
+	}
+	s.syncDirectory = nil
+	if e = s.Verify(context.Background(), token, "owner", id); e != nil {
+		t.Fatal("ciphertext lost after index publication", e)
+	}
+	s.syncDirectory = func() error { return failure }
+	if e = s.ChangePassword(token, "owner", password, "another generated password"); !errors.Is(e, failure) {
+		t.Fatal(e)
+	}
+	if s.Status(token, "owner").Unlocked {
+		t.Fatal("published password rotation retained old sessions")
+	}
+	s.syncDirectory = nil
+	s.Close()
+	reopened, e := Open(state)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer reopened.Close()
+	next, e := reopened.Unlock("another generated password", "owner")
+	if e != nil {
+		t.Fatal("published password not usable after reopen", e)
+	}
+	if e = reopened.Verify(context.Background(), next, "owner", id); e != nil {
+		t.Fatal("reopened ciphertext invalid", e)
+	}
+}
