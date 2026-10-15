@@ -228,6 +228,12 @@ func Declarations() []operations.Operation {
 			},
 		},
 		{
+			ID: "album.vault.move", Summary: "Encrypt and verify one photo, then remove its plaintext original and public metadata",
+			Scope: []string{"album"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall,
+			Timeout: 50 * time.Second, Mutex: operations.MutexAlbum,
+			Params: []operations.Param{{Name: "id", Kind: operations.ParamInt, Required: true}},
+		},
+		{
 			ID: "album.configure", Summary: "Configure local album directories without modifying originals",
 			Scope: []string{"album"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall,
 			Timeout: 10 * time.Second, Idempotent: true, Mutex: operations.MutexAlbum,

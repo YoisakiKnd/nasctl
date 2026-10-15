@@ -623,7 +623,7 @@ const MaxQueryLen = 256
 // buildWhere assembles the shared predicate and its arguments.
 func (f Filter) buildWhere() (string, []any) {
 	var (
-		clauses []string
+		clauses = []string{"m.kind <> 'private'"}
 		args    []any
 	)
 	if !f.IncludeMissing {
@@ -819,7 +819,7 @@ func (s *Store) CountMedia(ctx context.Context, f Filter) (int64, error) {
 // GetMedia loads one row by id.
 func (s *Store) GetMedia(ctx context.Context, id int64) (Media, error) {
 	rows, err := s.db.QueryContext(ctx,
-		fmt.Sprintf(`SELECT %s FROM media m JOIN collections c ON c.id = m.collection_id WHERE m.id = ?`, mediaColumns), id)
+		fmt.Sprintf(`SELECT %s FROM media m JOIN collections c ON c.id = m.collection_id WHERE m.id = ? AND m.kind <> 'private'`, mediaColumns), id)
 	if err != nil {
 		return Media{}, err
 	}

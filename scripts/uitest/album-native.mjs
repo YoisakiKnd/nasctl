@@ -8,7 +8,7 @@ const dom=new JSDOM(await(await request('/')).text(),{url:base+'/#album',runScri
 const w=dom.window,d=w.document,delay=(ms)=>new Promise((resolve)=>setTimeout(resolve,ms));
 const check=(ok,label)=>{if(!ok)throw new Error(label);console.log('ok:',label);};
 async function wait(test,label){const until=Date.now()+12000;while(Date.now()<until){if(test())return;await delay(30);}throw new Error('timed out: '+label);}
-const button=(label,scope=d)=>[...scope.querySelectorAll('button')].find((node)=>node.textContent.trim()===label);
+const button=(label,scope=d)=>[...scope.querySelectorAll('button')].find((node)=>(node.getAttribute('aria-label')||node.textContent.trim())===label);
 function input(label,value){const node=d.querySelector(`[aria-label="${label}"]`);check(node,'input '+label);node.value=value;node.dispatchEvent(new w.Event(node.tagName==='SELECT'?'change':'input',{bubbles:true}));}
 w.fetch=request;w.AbortController=AbortController;w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
 w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
@@ -29,9 +29,9 @@ try{
  button('确认保存目录').click();await delay(0);await wait(()=>button('确认添加目录')&&button('确认添加目录')&&!button('确认添加目录').disabled,'directory edit saved');
  settings=await(await request('/api/v1/album/settings')).json();check(settings.directories.some((item)=>item.code==='extra'&&!item.enabled),'enabled state saved');
  button('暂停后续处理').click();await wait(()=>!d.querySelector('dialog'),'pause task accepted');
- await wait(()=>d.querySelector('.album-view .notice.warning')?.textContent.includes('相册处理已暂停'),'actual albumctl pause is visible through local reader');
+ await wait(()=>d.querySelector('.album-view .photo-status')?.textContent.includes('相册处理已暂停'),'actual albumctl pause is visible through local reader');
  await manage();button('恢复处理许可').click();await wait(()=>!d.querySelector('dialog'),'resume task accepted');
- await wait(()=>d.querySelector('.task-monitor .badge')?.textContent==='已完成'&&![...d.querySelectorAll('.album-view .notice.warning')].some((node)=>node.textContent.includes('相册处理已暂停')),'actual albumctl resume completes');
+ await wait(()=>d.querySelector('.task-monitor .badge')?.textContent==='已完成'&&![...d.querySelectorAll('.album-view .photo-status')].some((node)=>node.textContent.includes('相册处理已暂停')),'actual albumctl resume completes');
  await manage();const savedRow=[...d.querySelectorAll('.album-directory-row')].find((node)=>node.textContent.includes('额外照片（停用）'));button('移除',savedRow).click();await delay(0);button('确认移除目录配置').click();
  await wait(()=>d.querySelectorAll('.album-directory-row').length===1&&button('确认添加目录')&&!button('确认添加目录').disabled,'managed directory removed without touching originals');
  button('关闭',d.querySelector('dialog')).click();await wait(()=>!d.querySelector('dialog'),'manager closes');

@@ -92,10 +92,22 @@ func (s *Server) handleAlbumList(w http.ResponseWriter, r *http.Request) {
 		s.albumError(w, err)
 		return
 	}
+	if s.PhotoVault != nil {
+		items := result.Items[:0]
+		for _, item := range result.Items {
+			if !s.PhotoVault.Protected(item.ID) {
+				items = append(items, item)
+			}
+		}
+		result.Items = items
+	}
 	writeJSON(w, 200, result)
 }
 func (s *Server) handleAlbumDetails(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAlbum(w) {
+		return
+	}
+	if !s.publicAlbumID(w, r) {
 		return
 	}
 	result, err := s.Album.Details(r.Context(), r.PathValue("id"))
@@ -130,6 +142,9 @@ func albumDisposition(value, part, id string) string {
 }
 func (s *Server) handleAlbumStream(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAlbum(w) {
+		return
+	}
+	if !s.publicAlbumID(w, r) {
 		return
 	}
 	id, part := r.PathValue("id"), r.PathValue("part")
@@ -262,4 +277,13 @@ func (s *Server) handleAlbumStream(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func (s *Server) publicAlbumID(w http.ResponseWriter, r *http.Request) bool {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if s.PhotoVault != nil && s.PhotoVault.Protected(id) {
+		writeError(w, 404, "not_found", "没有此照片")
+		return false
+	}
+	return true
 }

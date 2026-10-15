@@ -38,7 +38,7 @@
 </script>
 <svelte:window onpointermove={move} onpointerup={() => gesture=null} onpointercancel={() => gesture=null}/>
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-<section class="app-window" class:file-app={app.id==='files'} class:active class:maximized={frame.maximized} class:mobile class:window-hidden={frame.minimized || (mobile && !active)} style:left={frame.x+'px'} style:top={frame.y+'px'} style:width={frame.width+'px'} style:height={frame.height+'px'} style:z-index={frame.z} data-app={app.id} aria-label={app.label+'窗口'} tabindex="-1" onpointerdown={onfocus} onfocusin={onfocus}>
+<section class="app-window" class:file-app={app.id==='files'} class:photo-app={app.id==='album'} class:active class:maximized={frame.maximized} class:mobile class:window-hidden={frame.minimized || (mobile && !active)} style:left={frame.x+'px'} style:top={frame.y+'px'} style:width={frame.width+'px'} style:height={frame.height+'px'} style:z-index={frame.z} data-app={app.id} aria-label={app.label+'窗口'} tabindex="-1" onpointerdown={onfocus} onfocusin={onfocus}>
   <header class="window-bar">
     <button class="window-title" aria-label={app.label+'窗口标题，方向键移动，双击最大化'} onpointerdown={(event)=>begin(event,'move')} onkeydown={(event)=>key(event,'move')} ondblclick={()=>onchange({...frame,maximized:!frame.maximized})}><Icon name={app.icon} size={17}/><span>{app.label}</span></button>
     {#if notice}<span class="window-notice" role="status">{notice}</span>{/if}

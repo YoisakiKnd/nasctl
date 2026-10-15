@@ -11,13 +11,13 @@ export class APIError extends Error {
 // Authentication remains in the same-origin cookie; secrets are never stored
 // in localStorage or appended to download URLs.
 export async function api(path, options = {}) {
-  const { signal, ...init } = options;
+  const { signal, timeoutMs = 20_000, ...init } = options;
   const controller = new AbortController();
   const abort = () => controller.abort(signal?.reason);
   if (signal?.aborted) abort();
   else signal?.addEventListener('abort', abort, { once: true });
   let timedOut = false;
-  const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 20_000);
+  const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, Math.min(55_000, Math.max(1_000, timeoutMs)));
   try {
     const response = await fetch(path, { ...init, credentials: 'same-origin', signal: controller.signal });
     const body = await response.json().catch(() => null);

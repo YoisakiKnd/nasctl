@@ -1,9 +1,11 @@
 <script>
   import { onMount } from 'svelte';
   import { api, query, json } from '../lib/api.js';
-  import { bytes, duration } from '../lib/format.js';
+  import { duration } from '../lib/format.js';
   import Icon from '../components/Icon.svelte';
   import Dialog from '../components/Dialog.svelte';
+  import PhotoViewer from '../components/PhotoViewer.svelte';
+  import PhotoVault from '../components/PhotoVault.svelte';
   import TaskMonitor from '../components/TaskMonitor.svelte';
   let { readOnly = true, canConfigure = true } = $props();
   let managing = $state(false), configuration = $state(null), roots = $state([]), pending = $state(false), controlError = $state(''), controlMessage = $state('');
@@ -13,11 +15,27 @@
   let collection = $state(''), search = $state(''), kind = $state(''), from = $state(''), to = $state(''), sort = $state('time_desc'), missing = $state(false), fallback = $state(false), gps = $state(false);
   let cursor = $state(''), history = $state([]), page = $state(1), failedThumbs = $state({});
   let applied = $state({});
-  let selected = $state(null), detail = $state(null), detailError = $state(''), original = $state(false), imageError = $state('');
-  let request, detailRequest, generation = 0, disposed = false;
-  const timeLabels = {exif:'拍摄时间',container:'视频记录时间',filename:'文件名中的时间',filetime:'文件修改时间',none:'时间未记录'};
-  function capture(value) {return value ? value.replace('T',' ').slice(0,19) : '时间未记录';}
-  function mediaURL(item,part) {return '/api/v1/album/media/' + item.id + '/' + part;}
+  let view = $state('photos'), filtersOpen = $state(false), moveCandidate = $state(null), selected = $state(null);
+  let request, generation = 0, disposed = false;
+  const groups = $derived.by(() => {
+    const result = [];
+    for (const item of listing?.items || []) {
+      const month = /^\d{4}-\d{2}/.exec(item.taken_at || '')?.[0] || '';
+      const key = applied.sort === 'name_asc' ? 'all' : month;
+      let group = result.at(-1);
+      if (!group || group.key !== key) {
+        group = {key, label:key === 'all' ? '照片与视频' : month ? `${Number(month.slice(0,4))} 年 ${Number(month.slice(5,7))} 月` : '未记录日期', items:[]};
+        result.push(group);
+      }
+      group.items.push(item);
+    }
+    return result;
+  });
+  function browse(nextView, nextCollection = '') {
+    view = nextView; collection = nextCollection; kind = nextView === 'videos' ? 'video' : '';
+    search = ''; from = ''; to = ''; missing = false; fallback = false; gps = false;
+    load({reset:true});
+  }
   function collectionName(code) {return collections.find((item) => item.code === code)?.name || code;}
   function warningText(value) {
     if (value.startsWith('no token is configured:')) return '尚未设置访问令牌，请仅在可信网络中使用。';
@@ -42,12 +60,8 @@
   function apply(event) {event?.preventDefault(); load({reset:true});}
   function nextPage() {if (!listing?.next_cursor) return; load({next:listing.next_cursor,nextHistory:[...history,cursor].slice(-100),nextPage:page+1});}
   function previousPage() {if (!history.length) return; load({next:history[history.length-1],nextHistory:history.slice(0,-1),nextPage:page-1});}
-  async function open(item) {
-    selected = item; detail = null; detailError = ''; original = false; imageError = ''; detailRequest?.abort(); detailRequest = new AbortController();
-    try {const result = await api('/api/v1/album/media/' + item.id,{signal:detailRequest.signal}); if (!disposed && selected?.id === item.id) detail = result;}
-    catch (failure) {if (!disposed && failure.name !== 'AbortError') detailError = failure.message;}
-  }
-  function close() {selected = null; detailRequest?.abort();}
+  function open(item) {selected = item;}
+  function close() {selected = null;}
   function resetDirectory() {code = ''; directoryName = ''; directoryPath = ''; enabled = true; sharedVolume = false; editing = false; removing = '';}
   function editDirectory(item) {code = item.code; directoryName = item.name; directoryRoot = item.root; directoryPath = item.path; enabled = item.enabled; sharedVolume = item.allow_shared_volume; editing = true; removing = '';}
   async function manage() {
@@ -73,34 +87,56 @@
     try {const accepted = await api('/api/v1/album/tasks/' + operation,json('POST',input,{headers:{'X-Nasctl-Confirm':'1'}})); if (disposed) return; jobID = accepted.job_id; taskRunning = true; managing = false;}
     catch (failure) {if (!disposed) controlError = failure.message;} finally {if (!disposed) pending = false;}
   }
-  onMount(() => {load({reset:true}); return () => {disposed = true; request?.abort(); detailRequest?.abort();};});
+  onMount(() => {load({reset:true}); return () => {disposed = true; request?.abort();};});
 </script>
 <div class="album-view">
-  <header class="page-heading"><div><p class="eyebrow">照片与视频</p><h1>相册</h1><p class="muted">把值得珍藏的瞬间，好好收藏。</p></div><div class="button-group">{#if status?.mode === 'local' && !readOnly}<button class="button secondary" onclick={manage}><Icon name="settings" size={16}/>管理相册</button>{/if}{#if status?.public_url}<a class="button secondary" href={status.public_url} target="_blank" rel="noopener noreferrer">打开相册服务<Icon name="external" size={16}/></a>{/if}<button class="button secondary" disabled={loading} onclick={() => load()}><Icon name="refresh" size={16}/>刷新</button></div></header>
-  {#if jobID}<TaskMonitor id={jobID} onsettled={() => {taskRunning = false; load({reset:true});}}/>{/if}
-  {#if controlMessage}<p class="notice success" role="status">{controlMessage}</p>{/if}
-  {#if error}<p class="notice error" role="alert">{error}<button class="text-button" onclick={() => load()}>重试</button></p>{/if}
-  {#if loading && !status}<p class="loading-state" role="status">正在连接相册…</p>
-  {:else if status && !status.configured}<section class="empty-state panel"><Icon name="album" size={42}/><h2>相册已停用</h2><p>在配置中启用本地相册后，即可直接浏览照片与视频。</p><small>本地相册随 nasctl 运行，无需启动其他相册服务。</small></section>
-  {:else if status && !status.connected}<section class="empty-state panel"><Icon name="album" size={42}/><h2>暂时无法读取相册</h2><p>{status.error || (status.mode === 'local' ? '本地索引暂不可用，请检查目录权限和索引状态。' : '请检查相册服务和连接配置。')}</p><button class="button secondary" disabled={loading} onclick={() => load()}>重试</button></section>
-  {:else if status?.index_ready === false}<section class="empty-state panel"><Icon name="album" size={42}/><h2>还没有建立相册索引</h2><p>本地相册已启用。添加照片目录并建立索引后，照片和视频就会出现在这里。</p>{#if !readOnly}<button class="button primary" onclick={manage}>{canConfigure?'添加照片目录':'查看相册任务'}</button>{/if}<small>浏览只读取已有索引与缩略图，不会自动扫描或解码原文件。</small></section>
-  {:else if status?.connected}
-    {#if status.paused}<p class="notice warning">相册处理已暂停{status.pause_reason ? '：' + status.pause_reason : ''}。已建立的索引与缩略图仍可浏览。</p>{/if}
-    {#each status.warnings || [] as warning}<p class="notice warning">{warningText(warning)}</p>{/each}
-    <form class="panel album-filters" onsubmit={apply}>
-      <div class="album-filter-row"><label>集合<select aria-label="相册集合" bind:value={collection}><option value="">全部集合</option>{#each collections as item}<option value={item.code}>{item.name || item.code} · {item.media_count} 项</option>{/each}</select></label><label class="album-search">搜索<input type="search" aria-label="搜索相册" bind:value={search} maxlength="256" placeholder="文件名或目录"/></label><label>类型<select aria-label="相册类型" bind:value={kind}><option value="">全部类型</option><option value="image">照片</option><option value="video">视频</option><option value="other">其他</option><option value="unsupported">暂不支持</option></select></label><label>排序<select aria-label="相册排序" bind:value={sort}><option value="time_desc">时间从新到旧</option><option value="time_asc">时间从旧到新</option><option value="name_asc">名称</option></select></label></div>
-      <div class="album-filter-row"><label>开始日期<input type="date" aria-label="相册开始日期" bind:value={from}/></label><label>结束日期<input type="date" aria-label="相册结束日期" bind:value={to}/></label><label class="check-row"><input type="checkbox" bind:checked={missing}/><span>显示缺失原文件</span></label><label class="check-row"><input type="checkbox" bind:checked={fallback}/><span>仅估计时间</span></label><label class="check-row"><input type="checkbox" bind:checked={gps}/><span>含定位信息</span></label><button class="button primary" disabled={loading} type="submit">应用筛选</button></div>
-    </form>
-    {#each listing?.warnings || [] as warning}<p class="notice warning">{warning}</p>{/each}
-    {#if listing?.degraded}<p class="notice warning">缩略图处理处于资源保护状态，仍可读取已有内容。</p>{/if}
-    {#if loading}<p class="loading-state" role="status">正在读取相册…</p>
-    {:else if listing && !listing.items.length}<section class="empty-state panel"><Icon name="album" size={38}/><h2>没有匹配的照片或视频</h2><p>换一个筛选条件，或在“管理相册”中建立一次限量索引。</p></section>
-    {:else if listing}<div class="album-gallery">{#each listing.items as item (item.id)}<button class="album-tile panel" onclick={() => open(item)} aria-label={'查看 ' + item.name}><span class="album-frame">{#if failedThumbs[item.id]}<Icon name={item.kind === 'video' ? 'play' : 'album'} size={36}/>{:else}<img src={item.thumb_url} alt="" loading="lazy" decoding="async" onerror={() => failedThumbs[item.id] = true}/>{/if}{#if item.kind === 'video'}<span class="album-video-mark"><Icon name="play" size={16}/>{item.duration_ms ? duration(item.duration_ms/1000) : '视频'}</span>{/if}</span><span class="album-tile-info"><strong>{item.name}</strong><span>{capture(item.taken_at)}</span><small>{item.missing ? '原文件缺失' : item.taken_is_fallback ? '估计时间' : collectionName(item.collection)}</small></span></button>{/each}</div>{/if}
-    <footer class="pager"><span>{listing?.total_estimate >= 100000 ? '至少 100,000' : listing?.total_estimate || 0} 项 · 第 {page} 页</span><div class="button-group"><button class="text-button" disabled={loading || page === 1} onclick={() => load({reset:true})}>回到第一页</button><button class="button secondary small" disabled={loading || !history.length} onclick={previousPage}>上一页</button><button class="button secondary small" disabled={loading || !listing?.next_cursor} onclick={nextPage}>下一页</button></div></footer>
-    <p class="page-note">每页最多 48 项，保留最近 100 页的返回位置。缩略图缺失时显示占位图，不会在浏览时生成。</p>
+  <header class="photo-toolbar">
+    <nav class="photo-tabs" aria-label="相册导航">
+      <button class:chosen={view === 'photos'} aria-current={view === 'photos' ? 'page' : undefined} onclick={() => browse('photos')}>全部照片</button>
+      <button class:chosen={view === 'videos'} aria-current={view === 'videos' ? 'page' : undefined} onclick={() => browse('videos')}>视频</button>
+      <button class:chosen={view === 'albums'} aria-current={view === 'albums' ? 'page' : undefined} onclick={() => browse('albums')}>相簿</button>
+      {#if canConfigure && status?.mode === 'local'}<button class:chosen={view === 'vault'} aria-current={view === 'vault' ? 'page' : undefined} onclick={() => {view = 'vault'; selected = null;}}><Icon name="lock" size={13}/>保险箱</button>{/if}
+    </nav>
+    <div class="photo-tools">
+      {#if status?.mode === 'local' && !readOnly}<button class="icon-button" aria-label="管理相册" title="管理相册" onclick={manage}><Icon name="settings" size={19}/><span class="sr-only">管理相册</span></button>{/if}
+      <button class="icon-button" aria-label="刷新相册" title="刷新" disabled={loading} onclick={() => load()}><Icon name="refresh" size={19}/></button>
+    </div>
+  </header>
+  {#if view === 'vault'}<PhotoVault {readOnly} candidate={moveCandidate} oncancel={() => moveCandidate = null} onmoved={() => {moveCandidate = null; load({reset:true});}}/>{:else}
+  <div class="photo-library">
+    {#if jobID}<TaskMonitor id={jobID} onsettled={() => {taskRunning = false; load({reset:true});}}/>{/if}
+    {#if controlMessage}<p class="notice success" role="status">{controlMessage}</p>{/if}
+    {#if error}<p class="notice error" role="alert">{error}<button class="text-button" onclick={() => load()}>重试</button></p>{/if}
+    {#if loading && !status}<p class="loading-state" role="status">正在读取照片…</p>
+    {:else if status && !status.configured}<section class="empty-state"><Icon name="album" size={42}/><h2>让回忆有个家</h2><p>启用本地相册后，就可以在这里浏览照片和视频。</p></section>
+    {:else if status && !status.connected}<section class="empty-state"><Icon name="album" size={42}/><h2>暂时无法读取照片</h2><p>{status.error || '请检查照片文件夹是否可用。'}</p><button class="button secondary" disabled={loading} onclick={() => load()}>重试</button></section>
+    {:else if status?.index_ready === false}<section class="empty-state"><Icon name="album" size={42}/><h2>你的第一本相册</h2><p>添加照片文件夹，把珍藏的照片和视频带到这里。</p>{#if !readOnly}<button class="button primary" onclick={manage}>{canConfigure ? '添加照片文件夹' : '查看相册任务'}</button>{:else}<p class="muted">请管理员添加照片文件夹。</p>{/if}</section>
+    {:else if status?.connected}
+      <div class="photo-library-heading"><div><h1>{view === 'albums' ? '我的相簿' : collection ? collectionName(collection) : view === 'videos' ? '视频' : '所有回忆'}</h1><p class="muted">{view === 'albums' ? collections.length + ' 本相簿' : (listing?.total_estimate >= 100000 ? '至少 100,000' : listing?.total_estimate || 0) + ' 项回忆'}</p></div>{#if status.paused}<span class="photo-status" title="已收藏的照片仍可浏览">相册处理已暂停</span>{/if}</div>
+      {#if view === 'albums'}
+        <div class="photo-albums">{#each collections as album (album.code)}{@const cover = listing?.items.find((item) => item.collection === album.code && !failedThumbs[item.id])}<button class="photo-album" onclick={() => browse('photos',album.code)}><span class="photo-album-cover">{#if cover}<img src={cover.thumb_url} alt="" loading="lazy" decoding="async" onerror={() => failedThumbs[cover.id] = true}/>{:else}<Icon name="album" size={42}/>{/if}</span><strong>{album.name || album.code}</strong><span>{album.media_count} 项</span></button>{/each}</div>
+        {#if !collections.length}<section class="empty-state"><Icon name="album" size={38}/><h2>还没有相簿</h2><p>添加的照片文件夹会显示在这里。</p>{#if !readOnly}<button class="button primary" onclick={manage}>添加照片文件夹</button>{/if}</section>{/if}
+      {:else}
+        <form class="album-filters" onsubmit={apply}>
+          <div class="photo-search-row"><label class="photo-search"><Icon name="search" size={17}/><input type="search" aria-label="搜索相册" bind:value={search} maxlength="256" placeholder="搜索照片与视频"/></label><button class="icon-button" aria-label="搜索照片" title="搜索" disabled={loading} type="submit"><Icon name="forward" size={18}/></button><button class:chosen={filtersOpen} class="photo-filter-toggle" type="button" aria-expanded={filtersOpen} aria-controls="album-filter-options" onclick={() => filtersOpen = !filtersOpen}><Icon name="sliders" size={17}/>筛选</button></div>
+          {#if filtersOpen}<div id="album-filter-options" class="photo-filter-options">
+            <div class="album-filter-row"><label>相簿<select aria-label="相册集合" bind:value={collection}><option value="">全部相簿</option>{#each collections as item}<option value={item.code}>{item.name || item.code}</option>{/each}</select></label><label>类型<select aria-label="相册类型" bind:value={kind}><option value="">照片与视频</option><option value="image">照片</option><option value="video">视频</option><option value="other">其他</option><option value="unsupported">暂不支持</option></select></label><label>排序<select aria-label="相册排序" bind:value={sort}><option value="time_desc">最新在前</option><option value="time_asc">最早在前</option><option value="name_asc">名称</option></select></label><label>开始日期<input type="date" aria-label="相册开始日期" bind:value={from}/></label><label>结束日期<input type="date" aria-label="相册结束日期" bind:value={to}/></label></div>
+            <div class="album-filter-row"><label class="check-row"><input type="checkbox" bind:checked={missing}/><span>显示缺失原文件</span></label><label class="check-row"><input type="checkbox" bind:checked={fallback}/><span>仅估计时间</span></label><label class="check-row"><input type="checkbox" bind:checked={gps}/><span>含定位信息</span></label><button class="button primary small" disabled={loading} type="submit">应用筛选</button></div>
+          </div>{/if}
+        </form>
+        {#if loading}<p class="loading-state" role="status">正在读取照片…</p>
+        {:else if listing && !listing.items.length}<section class="empty-state"><Icon name="album" size={38}/><h2>这里还没有照片</h2><p>试试其他搜索条件，或将照片文件夹添加到相册。</p>{#if !readOnly}<button class="button secondary" onclick={manage}>管理照片文件夹</button>{/if}</section>
+        {:else if listing}{#each groups as group}<section class="photo-month"><header><h2>{group.label}</h2><span>{group.items.length} 项</span></header><div class="album-gallery">{#each group.items as item (item.id)}<button class="album-tile" onclick={() => open(item)} aria-label={'查看 ' + item.name} title={item.name}><span class="album-frame">{#if failedThumbs[item.id]}<Icon name={item.kind === 'video' ? 'play' : 'album'} size={36}/>{:else}<img src={item.thumb_url} alt="" loading="lazy" decoding="async" onerror={() => failedThumbs[item.id] = true}/>{/if}{#if item.kind === 'video'}<span class="album-video-mark"><Icon name="play" size={13}/>{item.duration_ms ? duration(item.duration_ms/1000) : '视频'}</span>{/if}{#if item.missing}<span class="photo-missing" title="原文件暂不可用"><Icon name="warning" size={15}/></span>{/if}</span></button>{/each}</div></section>{/each}{/if}
+        <footer class="photo-pager"><span>第 {page} 页</span><div class="button-group"><button class="text-button" disabled={loading || page === 1} onclick={() => load({reset:true})}>回到第一页</button><button class="icon-button" aria-label="上一页" title="上一页" disabled={loading || !history.length} onclick={previousPage}><Icon name="back" size={18}/></button><button class="icon-button" aria-label="下一页" title="下一页" disabled={loading || !listing?.next_cursor} onclick={nextPage}><Icon name="forward" size={18}/></button></div></footer>
+      {/if}
+    {/if}
+  </div>
   {/if}
 </div>
 {#if managing}<Dialog title="管理本地相册" wide onclose={() => {if (!pending) managing = false;}}>
+  {#if status?.paused}<p class="notice warning">相册处理已暂停{status.pause_reason ? '：' + status.pause_reason : ''}。已有照片仍可浏览。</p>{/if}
+  {#each [...(status?.warnings || []),...(listing?.warnings || [])] as warning}<p class="notice warning">{warningText(warning)}</p>{/each}
+  {#if listing?.degraded}<p class="notice warning">缩略图处理处于资源保护状态，仍可读取已有内容。</p>{/if}
   {#if controlError}<p class="notice error" role="alert">{controlError}</p>{/if}
   {#if pending && !configuration}<p role="status">正在读取目录设置…</p>{/if}
   {#if configuration}
@@ -121,14 +157,4 @@
   {/if}
   <div class="dialog-footer"><button class="button secondary" disabled={pending} onclick={() => managing = false}>关闭</button></div>
 </Dialog>{/if}
-{#if selected}<Dialog title={selected.name} wide onclose={close}>
-  {#if detailError}<p class="notice error" role="alert">{detailError}</p>{:else if !detail}<p role="status">正在读取媒体详情…</p>{:else}<div class="album-detail">
-    <div class="album-detail-preview">{#if detail.item.missing}<img src={mediaURL(detail.item,'thumb')} alt={detail.item.name}/><p class="notice warning">原文件暂不可用，显示已有缩略图。</p>
-      {:else if detail.item.kind === 'video' && detail.item.playable}<video controls preload="metadata" src={mediaURL(detail.item,'raw')} onerror={() => imageError = '浏览器无法播放当前编码，可下载后使用本地播放器。'}><track kind="captions"/></video>
-      {:else if detail.item.kind === 'image'}<img src={mediaURL(detail.item,original ? 'raw' : 'thumb')} alt={detail.item.name} onerror={() => imageError = '浏览器无法显示当前格式，可下载后使用本地应用打开。'}/>{#if !original}<button class="button secondary small" onclick={() => {original = true; imageError = '';}}>查看原图 · {bytes(detail.item.bytes)}</button>{/if}
-      {:else}<img src={mediaURL(detail.item,'thumb')} alt=""/><p class="muted">这种格式需要下载后使用本地应用打开。</p>{/if}
-      {#if imageError}<p class="notice error" role="alert">{imageError}</p>{/if}
-    </div>
-    <div><dl class="key-values"><dt>集合</dt><dd>{collectionName(detail.item.collection)}</dd><dt>位置</dt><dd>{detail.paths?.display || detail.item.name}</dd><dt>大小</dt><dd>{bytes(detail.item.bytes)}</dd><dt>{timeLabels[detail.item.taken_src] || '记录时间'}</dt><dd>{capture(detail.item.taken_at)}{detail.item.taken_is_fallback ? '（估计）' : ''}</dd>{#if detail.item.width && detail.item.height}<dt>尺寸</dt><dd>{detail.item.width} × {detail.item.height}</dd>{/if}{#if detail.item.make || detail.item.model}<dt>设备</dt><dd>{[detail.item.make,detail.item.model].filter(Boolean).join(' ')}</dd>{/if}{#if detail.item.duration_ms}<dt>时长</dt><dd>{duration(detail.item.duration_ms/1000)}</dd>{/if}{#if detail.item.gps}<dt>定位</dt><dd>{detail.item.gps.lat}, {detail.item.gps.lon}</dd>{/if}</dl>{#if Object.keys(detail.exif || {}).length}<details><summary>更多元数据</summary><dl class="key-values">{#each Object.entries(detail.exif) as [key,value]}<dt>{key}</dt><dd>{value}</dd>{/each}</dl></details>{/if}{#each detail.warnings || [] as warning}<p class="notice warning">{warning}</p>{/each}{#if detail.item.note}<p class="field-help">{detail.item.note}</p>{/if}</div>
-  </div><div class="dialog-footer"><button class="button secondary" onclick={close}>关闭</button>{#if !detail.item.missing}<a class="button primary" href={mediaURL(detail.item,'download')} download={detail.item.name}><Icon name="download" size={16}/>下载原文件</a>{/if}</div>{/if}
-</Dialog>{/if}
+{#if selected}<PhotoViewer {selected} items={listing?.items || []} onselect={open} onclose={close} {collectionName} onmove={!readOnly && canConfigure && status?.mode === 'local' ? (item) => {moveCandidate = item; close(); view = 'vault';} : undefined}/>{/if}

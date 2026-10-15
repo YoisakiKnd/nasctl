@@ -38,6 +38,7 @@ import (
 	"github.com/YoisakiKnd/nasctl/internal/hubstore"
 	"github.com/YoisakiKnd/nasctl/internal/jobs"
 	"github.com/YoisakiKnd/nasctl/internal/operations"
+	"github.com/YoisakiKnd/nasctl/internal/photovault"
 	"github.com/YoisakiKnd/nasctl/internal/settings"
 	"github.com/YoisakiKnd/nasctl/internal/suzu"
 )
@@ -109,6 +110,9 @@ type Server struct {
 	Anime        *anime.Engine
 	Album        *album.Client
 	AlbumControl album.Control
+	PhotoVault   *photovault.Store
+	VaultMover   photovault.Mover
+	vaultAuth    browserAuth
 	Backups      backups.Control
 	Settings     settings.Control
 	Accounts     accounts.Control
@@ -244,6 +248,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.handleJob)
 
 	mux.HandleFunc("GET /api/v1/media/status", s.handleMediaStatus)
+	mux.HandleFunc("GET /api/v1/album/vault/status", s.handleVaultStatus)
+	mux.HandleFunc("POST /api/v1/album/vault/{operation}", s.handleVaultPassword)
+	mux.HandleFunc("POST /api/v1/album/vault/move", s.handleVaultMove)
+	mux.HandleFunc("GET /api/v1/album/vault/media", s.handleVaultList)
+	mux.HandleFunc("GET /api/v1/album/vault/media/{id}", s.handleVaultDetails)
+	mux.HandleFunc("GET /api/v1/album/vault/media/{id}/{part}", s.handleVaultStream)
 	mux.HandleFunc("GET /api/v1/album/status", s.handleAlbumStatus)
 	mux.HandleFunc("GET /api/v1/album/settings", s.handleAlbumSettings)
 	mux.HandleFunc("POST /api/v1/album/directories", s.handleAlbumDirectory)

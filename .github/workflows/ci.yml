@@ -390,7 +390,7 @@ jobs:
 
       - name: Native album without a second HTTP service and real worker pause/resume
         run: |
-          go run ./scripts/uitest/seed-album --fixture-only --root /tmp/nasctl-ci-native-album --hub-port 18099 --album-port 18100
+          go run ./scripts/uitest/seed-album --fixture-only --writable --root /tmp/nasctl-ci-native-album --hub-port 18099 --album-port 18100
           /tmp/nasctl serve --config /tmp/nasctl-ci-native-album/native.toml > /tmp/native-album.log 2>&1 &
           ready=0
           for i in $(seq 1 50); do
@@ -403,6 +403,7 @@ jobs:
           test "$ready" = 1
           node scripts/uitest/album.mjs http://127.0.0.1:18099
           node scripts/uitest/album-native.mjs http://127.0.0.1:18099
+          node scripts/uitest/photo-vault.mjs http://127.0.0.1:18099 /tmp/nasctl-ci-native-album
 
       - name: Single-download controls, metadata versions and bounded history cleanup
         run: |

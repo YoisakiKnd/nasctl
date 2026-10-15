@@ -279,6 +279,13 @@ func restore(ctx context.Context, l Layout, dir, digest string, report func(stri
 	if len(digest) != 64 || digest != result.ManifestSHA256 || m.LayoutSHA256 != l.fingerprint() {
 		return result, errors.New("state restore: confirmation or configured layout changed")
 	}
+	// State packages do not include photo payloads. Reinstating an older album
+	// index could expose pre-vault names/metadata, so refuse this mixed restore.
+	if _, err := os.Lstat(filepath.Join(l.State, ".nasctl-photo-vault", "vault.json")); err == nil {
+		return result, errors.New("state restore: an encrypted photo vault is configured; restore the complete state and vault together from an offline filesystem backup")
+	} else if !os.IsNotExist(err) {
+		return result, err
+	}
 	entries := map[string]Entry{}
 	for _, v := range m.Entries {
 		entries[v.Key] = v

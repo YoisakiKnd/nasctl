@@ -41,6 +41,7 @@ func picture(index, width, height int) []byte {
 	return buffer.Bytes()
 }
 func main() {
+	writable := flag.Bool("writable", false, "allow writes in this disposable photo root")
 	fixture := flag.Bool("fixture-only", false, "acknowledge disposable test data")
 	base := flag.String("root", "", "empty or previously owned fixture directory")
 	albumPort := flag.Int("album-port", 18095, "local album port")
@@ -71,7 +72,7 @@ func main() {
 	must(os.WriteFile(filepath.Join(abs, "hub.toml"), []byte(hubDoc), 0600))
 	// This uses the same actual index/cache, with no album HTTP service. The
 	// processing component is discovered beside the nasctl binary when needed.
-	nativeDoc := fmt.Sprintf("[server]\nbind=\"127.0.0.1:%d\"\n[paths]\nstate_dir=%q\ncache_dir=%q\n[[collections]]\ncode=\"photos\"\nname=\"Fixture Photos\"\nroot=%q\nenabled=true\nallow_shared_volume=true\n[[hub.storage]]\nid=\"photos\"\nlabel=\"Fixture Photos\"\npath=%q\n[hub.album]\nmode=\"local\"\n", *hubPort, filepath.Join(abs, "album-state"), filepath.Join(abs, "cache"), filepath.Join(abs, "library"), filepath.Join(abs, "library"))
+	nativeDoc := fmt.Sprintf("[server]\nbind=\"127.0.0.1:%d\"\n[paths]\nstate_dir=%q\ncache_dir=%q\n[[collections]]\ncode=\"photos\"\nname=\"Fixture Photos\"\nroot=%q\nenabled=true\nallow_shared_volume=true\n[[hub.storage]]\nid=\"photos\"\nlabel=\"Fixture Photos\"\npath=%q\nwritable=%t\n[hub.album]\nmode=\"local\"\n", *hubPort, filepath.Join(abs, "album-state"), filepath.Join(abs, "cache"), filepath.Join(abs, "library"), filepath.Join(abs, "library"), *writable)
 	must(os.WriteFile(filepath.Join(abs, "native.toml"), []byte(nativeDoc), 0600))
 	st, err := store.Open(cfg.Paths.IndexFile, store.Options{})
 	must(err)

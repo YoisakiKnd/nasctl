@@ -612,3 +612,34 @@ func TestAccountStateBackupCannotRestoreAnonymousMode(t *testing.T) {
 		t.Fatal("newer account checkpoint invalid", e)
 	}
 }
+
+func TestStateRestoreCannotResurrectPreVaultAlbumMetadata(t *testing.T) {
+	ctx := context.Background()
+	layout, dir := fixture(t)
+	snapshot, e := Create(ctx, layout, dir, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	vault := filepath.Join(layout.State, ".nasctl-photo-vault")
+	if e = os.Mkdir(vault, 0700); e != nil {
+		t.Fatal(e)
+	}
+	if e = os.WriteFile(filepath.Join(vault, "vault.json"), []byte("configured-vault-marker"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	before, e := os.ReadFile(layout.Album)
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, e = Restore(ctx, layout, dir, snapshot.ManifestSHA256, nil)
+	if e == nil || !strings.Contains(e.Error(), "encrypted photo vault") {
+		t.Fatal("restore bypassed vault protection", e)
+	}
+	after, e := os.ReadFile(layout.Album)
+	if e != nil || !bytes.Equal(before, after) {
+		t.Fatal("refused restore changed album index", e)
+	}
+	if _, e = os.Stat(filepath.Join(layout.State, "restore-checkpoints")); !os.IsNotExist(e) {
+		t.Fatal("refusal consumed a checkpoint", e)
+	}
+}

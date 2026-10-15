@@ -26,6 +26,7 @@ import (
 	"github.com/YoisakiKnd/nasctl/internal/jobs"
 	"github.com/YoisakiKnd/nasctl/internal/logx"
 	"github.com/YoisakiKnd/nasctl/internal/operations"
+	"github.com/YoisakiKnd/nasctl/internal/photovault"
 	"github.com/YoisakiKnd/nasctl/internal/resource"
 	"github.com/YoisakiKnd/nasctl/internal/settingslocal"
 	"github.com/YoisakiKnd/nasctl/internal/statelease"
@@ -270,6 +271,14 @@ func cmdServe(ctx context.Context, env Env, cfg *config.Config, g globals, args 
 	srv.Album = albumClient
 	if albumControl != nil {
 		srv.AlbumControl = albumControl
+		vault, err := photovault.Open(cfg.Paths.StateDir)
+		if err != nil {
+			fmt.Fprintf(env.Stderr, "nasctl: cannot open photo vault: %v\n", err)
+			return 1
+		}
+		defer vault.Close()
+		srv.PhotoVault = vault
+		srv.VaultMover = albumControl
 	}
 	srv.WorkContext = workCtx
 	if backupControl != nil {

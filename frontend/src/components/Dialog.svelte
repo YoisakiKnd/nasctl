@@ -1,6 +1,6 @@
 <script>
   import { getContext, onMount } from 'svelte';
-  let { title, description = '', onclose, children, wide = false } = $props();
+  let { title, description = '', onclose, children, wide = false, photo = false, onkey } = $props();
   let element;
   const id = $props.id();
   const host = getContext('nasctl-window-dialogs');
@@ -11,6 +11,7 @@
     if (host) element.setAttribute('open','');
     else {document.body.classList.add('modal-open'); element.showModal();}
     element.querySelector('input:not([type="hidden"]),select,textarea')?.focus();
+    if (photo) element.querySelector('button')?.focus();
     return () => {
       const ownedFocus = element.contains(document.activeElement);
       unregister?.();
@@ -19,6 +20,7 @@
     };
   });
   function keys(event) {
+    onkey?.(event);
     if (!host) return;
     if (event.key === 'Escape') {event.preventDefault(); event.stopPropagation(); onclose();}
     if (event.key !== 'Tab') return;
@@ -29,7 +31,7 @@
   }
 </script>
 <div class:window-modal-layer={host}>
-<dialog aria-labelledby={id} bind:this={element} class:wide onkeydown={keys} oncancel={(event) => { event.preventDefault(); onclose(); }}>
+<dialog aria-labelledby={id} bind:this={element} class:wide class:photo-dialog={photo} onkeydown={keys} oncancel={(event) => { event.preventDefault(); onclose(); }}>
   <div class="dialog-heading">
     <div><h2 {id}>{title}</h2>{#if description}<p class="muted">{description}</p>{/if}</div>
     <button class="icon-button" aria-label="关闭对话框" onclick={onclose}>×</button>
