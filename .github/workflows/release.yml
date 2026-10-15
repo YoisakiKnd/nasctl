@@ -1,108 +1,148 @@
-# Release: build the ARMv7 artefacts for a tag and attach them.
-#
-# Triggered by a version tag, not by a push. A release is a deliberate act, and
-# the artefacts a tag points at should be the ones the tag was made from.
-#
-# What this does NOT do: deploy anything, publish to a package registry, or touch
-# any machine. The artefacts are attached to the release so a person can download
-# them and verify the checksums; installing them remains a manual, authorised
-# step (docs/RUNBOOK.md).
-
+# Version tags publish a matched, checked set of all three Linux packages.
+# Manual runs default to building artifacts without publishing a release.
 name: release
 
 on:
   push:
-    tags:
-      - "v*"
-  # Allows a dry run: build and upload as a workflow artefact without creating a
-  # release, so the pipeline can be checked before a tag is cut.
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Build and upload as a workflow artefact only"
+        description: "Build artifacts only; publishing requires a version-tag ref"
         type: boolean
         default: true
 
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   GO_VERSION: "1.27.1"
 
 jobs:
-  build:
-    name: ARMv7 artefacts
+  verify:
+    name: Verify version and passed main CI
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 5
     permissions:
-      # Needed only to attach files to a release.
-      contents: write
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          # The version comes from the tag, and the build script reads VERSION
-          # and the commit, so the history has to be present.
-          fetch-depth: 0
+      - name: Validate release version and ref
+        id: version
+        env:
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          version="$(cat VERSION)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test -f "docs/releases/v$version.md"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            test "$GITHUB_REF_NAME" = "v$version"
+          elif [[ "$DRY_RUN" != true ]]; then
+            echo 'Publishing requires a version-tag ref.' >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Require successful CI for this exact commit on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          passed_sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&status=completed&per_page=100" \
+            --jq '[.workflow_runs[] | select(.head_branch == "main" and .event == "push" and .conclusion == "success")][0].head_sha // ""')"
+          if [[ "$passed_sha" != "$GITHUB_SHA" ]]; then
+            echo 'Run CI successfully on main for this exact commit before releasing.' >&2
+            exit 1
+          fi
 
+  build:
+    name: Release package (${{ matrix.arch }})
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64, armv7]
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-
-      - name: Test before releasing
-        # A release must not be built from a commit whose tests fail. This is the
-        # same suite as CI; if it is green there, it is green here.
-        run: go test -count=1 ./...
-
-      - name: Build
-        run: SOURCE_DATE_EPOCH=1760000000 ./scripts/build-armv7.sh
-
-      - name: Verify the checksums
-        run: sha256sum -c dist/SHA256SUMS
-
-      - name: Assert the binaries are static 32-bit ARM
+      - name: Build release-version static package
+        env:
+          NASCTL_ARCH: ${{ matrix.arch }}
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+        run: bash scripts/package-linux.sh "$NASCTL_ARCH"
+      - name: Check native version metadata
+        if: matrix.arch == 'amd64'
+        env:
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          fail=0
-          for bin in dist/albumctl-linux-armv7 dist/nasctl-linux-armv7; do
-            file "$bin" | grep -q "ELF 32-bit LSB.*ARM" || { echo "::error::$bin is not 32-bit ARM"; fail=1; }
-            readelf -d "$bin" | grep -q NEEDED && { echo "::error::$bin links a shared library"; fail=1; }
-            readelf -l "$bin" | grep -q interpreter && { echo "::error::$bin is not static"; fail=1; }
+          mkdir -p /tmp/nasctl-release-check
+          tar -xzf dist/nasctl-linux-amd64.tar.gz -C /tmp/nasctl-release-check
+          for program in nasctl albumctl; do
+            output="$(/tmp/nasctl-release-check/nasctl-linux-amd64/$program version)"
+            echo "$output"
+            [[ "$output" == *" $RELEASE_VERSION (commit $GITHUB_SHA,"* ]]
+            [[ "$output" != *"-dev"* ]]
           done
-          exit $fail
-
-      - name: Attach to the release
-        if: github.event_name == 'push' && !inputs.dry_run
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/albumctl-linux-armv7
-            dist/nasctl-linux-armv7
-            dist/SHA256SUMS
-            dist/README.txt
-            dist/deps.txt
-          # The build record explains how to verify the download and what the
-          # binaries need at run time, so it belongs with them.
-          body: |
-            ARMv7 (armv7l) static binaries for the OneCloud Hub.
-
-            Verify the download before using it:
-
-                sha256sum -c SHA256SUMS
-
-            `deps.txt` records what the binaries need at run time (nothing beyond
-            the kernel) and `README.txt` records the toolchain and sizes.
-
-            **Not verified on the target machine.** These binaries were built and
-            smoke-tested under emulation only. See `docs/HUB-STAGE-B.md` §7 for
-            the list of what remains unverified, including memory ceilings.
-
       - uses: actions/upload-artifact@v4
         with:
-          name: armv7-${{ github.ref_name }}
+          name: release-linux-${{ matrix.arch }}
           path: |
-            dist/albumctl-linux-armv7
-            dist/nasctl-linux-armv7
-            dist/SHA256SUMS
-            dist/README.txt
-            dist/deps.txt
+            dist/nasctl-linux-${{ matrix.arch }}.tar.gz
+            dist/nasctl-linux-${{ matrix.arch }}.tar.gz.sha256
+          if-no-files-found: error
           retention-days: 30
+
+  publish:
+    name: Publish complete release
+    needs: [verify, build]
+    if: github.ref_type == 'tag' && (github.event_name == 'push' || !inputs.dry_run)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-linux-*
+          merge-multiple: true
+          path: dist
+      - name: Check every package and combine checksums
+        run: |
+          cd dist
+          for arch in amd64 arm64 armv7; do
+            sha256sum -c "nasctl-linux-$arch.tar.gz.sha256"
+          done
+          cat nasctl-linux-{amd64,arm64,armv7}.tar.gz.sha256 > SHA256SUMS
+          sha256sum -c SHA256SUMS
+      - name: Upload to a draft and verify uploaded bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          if draft="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            test "$draft" = true
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
+              --title "nasctl v$RELEASE_VERSION" --notes-file "docs/releases/v$RELEASE_VERSION.md"
+          fi
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" dist/*.tar.gz dist/*.sha256 dist/SHA256SUMS --clobber
+          mkdir -p /tmp/nasctl-release-download
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir /tmp/nasctl-release-download
+          cd /tmp/nasctl-release-download
+          sha256sum -c SHA256SUMS
+          cmp SHA256SUMS "$GITHUB_WORKSPACE/dist/SHA256SUMS"
+      - name: Publish verified assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest

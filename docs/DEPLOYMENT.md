@@ -34,6 +34,11 @@ sha256sum -c SHA256SUMS
 `bash scripts/package-linux.sh amd64|arm64|armv7` 生成相同结构；此打包脚本需要 GNU tar、
 readelf、file 与 sha256sum，目标 NAS 日常运行不需要这些构建工具。
 
+正式安装包发布在 [GitHub Releases](https://github.com/YoisakiKnd/nasctl/releases)，不受
+Actions 产物 30 天保留期限制。`vX.Y.Z` 标签须与 VERSION 一致，且对应提交已通过 main
+上的完整 CI。Release 工作流将版本标识设为 `X.Y.Z`（无 `-dev`），构建三架构，在草稿中
+上传并下载核对字节，全部成功后才公开。手动运行默认只验收产物，不公开发版。
+
 ## 全新安装
 
 以下命令只适用于全新目录。已有 albumctl 的状态应保持原所有权；让 NAS 单元使用

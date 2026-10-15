@@ -10,11 +10,17 @@ case "$nasctl_arch" in
 esac
 nasctl_go=${GO:-go}
 nasctl_out=${OUT_DIR:-dist}
+nasctl_base_version=$(cat VERSION)
+[[ $nasctl_base_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'invalid VERSION' >&2; exit 2; }
+nasctl_version="$nasctl_base_version-dev"
+if [[ -n ${RELEASE_VERSION:-} ]]; then
+  [[ $RELEASE_VERSION == "$nasctl_base_version" ]] || { echo 'RELEASE_VERSION must match VERSION' >&2; exit 2; }
+  nasctl_version=$RELEASE_VERSION
+fi
 nasctl_epoch=${SOURCE_DATE_EPOCH:-$(git show -s --format=%ct HEAD)}
 [[ $nasctl_epoch =~ ^[0-9]{1,12}$ ]] || { echo 'invalid SOURCE_DATE_EPOCH' >&2; exit 2; }
 nasctl_time=$(date -u -d "@$nasctl_epoch" +%Y-%m-%dT%H:%M:%SZ)
 nasctl_commit=$(git rev-parse HEAD)
-nasctl_version="$(cat VERSION)-dev"
 nasctl_target="linux/$nasctl_goarch"
 if [[ $nasctl_arch == armv7 ]]; then nasctl_target='linux/arm/GOARM7'; fi
 mkdir -p -- "$nasctl_out"
@@ -55,7 +61,11 @@ done
   echo 'Verify inside this directory: sha256sum -c SHA256SUMS'
   echo 'Install nasctl and albumctl together; start only nasctl for daily use.'
   echo 'Follow docs/DEPLOYMENT.md for first setup, permissions and upgrades.'
-  echo 'This is a CI development build, not a tagged stable release.'
+  if [[ -n ${RELEASE_VERSION:-} ]]; then
+    echo "Release-version build: $nasctl_version. Publication is controlled by the release workflow."
+  else
+    echo 'This is a CI development build, not a tagged stable release.'
+  fi
   echo 'Cross-compilation is not evidence of real NAS hardware validation.'
 } > "$nasctl_package/BUILD.txt"
 (
