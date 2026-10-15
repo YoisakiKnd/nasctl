@@ -62,6 +62,21 @@ func (c *Control) MoveToVault(ctx context.Context, vault *photovault.Store, toke
 		if e != nil {
 			return "", e
 		}
+		// The same file indexed through another configured collection would retain
+		// a second public thumbnail. Refuse this ambiguous move before copying.
+		sourceReal, resolveErr := filepath.EvalSymlinks(joined)
+		if resolveErr != nil {
+			return "", errors.New("照片原件暂不可用")
+		}
+		for _, other := range cfg.Collections {
+			if other.Code == media.CollectionCode {
+				continue
+			}
+			otherRoot, resolveErr := filepath.EvalSymlinks(other.Root)
+			if resolveErr == nil && fsutil.IsWithin(otherRoot, sourceReal) {
+				return "", errors.New("此照片被多个相册目录引用，请先移除重叠的目录配置")
+			}
+		}
 		for _, root := range cfg.Hub.Storage {
 			if fsutil.IsWithin(root.Path, col.Root) && root.Writable {
 				relative, e := filepath.Rel(root.Path, joined)

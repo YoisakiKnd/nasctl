@@ -244,7 +244,7 @@ func (s *Server) handleVaultMove(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 409, map[string]any{"error": "vault_pending", "message": "加密副本已保存，但原件清理未完成。原件可能仍存在，请在保险箱中重试完成移入。"})
 			return
 		}
-		writeError(w, 400, "vault_move_failed", "未移入保险箱：请确认照片不超过 64 MiB、目录允许写入，且没有其他相册任务或文件写入正在进行")
+		writeError(w, 400, "vault_move_failed", "未移入保险箱：请确认照片不超过 64 MiB、目录允许写入、没有重叠的相册目录，且没有其他相册任务或文件写入正在进行")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"id": vaultID, "moved": true})

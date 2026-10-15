@@ -83,6 +83,19 @@ func TestVaultMoveRemovesPlaintextCacheMetadataAndOldURLs(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
+	// A second collection of the same source would retain another public cache.
+	if e = control.Configure(ctx, album.Directory{Code: "overlap", Name: "Overlap", Root: "photos", Path: ".", Enabled: true, AllowSharedVolume: true}); e != nil {
+		t.Fatal(e)
+	}
+	if moved, e := control.MoveToVault(ctx, vault, token, "owner", up.ID, details); e == nil || moved != "" {
+		t.Fatal("overlapping collection accepted", e)
+	}
+	if _, e = os.Stat(source); e != nil {
+		t.Fatal("overlap refusal changed original", e)
+	}
+	if e = control.RemoveDirectory(ctx, "overlap"); e != nil {
+		t.Fatal(e)
+	}
 	// Simulate a cache cleanup failure after the verified original has been sealed.
 	blocker := filepath.Join(filepath.Dir(cache), key+"_256.jpg")
 	os.Mkdir(blocker, 0700)
