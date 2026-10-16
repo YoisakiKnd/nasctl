@@ -108,7 +108,7 @@
   <Login available={auth.login_available} accounts={auth.accounts_enabled} setup={auth.setup_required} tokenAvailable={auth.token_login_available} onlogin={checkAuth}/>
 {:else}
 <a class="skip-link" href="#content">跳至桌面</a>
-<div class="desktop-shell">
+<div class="desktop-shell" class:mobile-photo={mobile && active === 'album'}>
   <DesktopLandscape/>
   <header class="topbar desktop-topbar"><button class="desktop-brand" aria-label="显示桌面" onclick={desktop}><span class="brand-symbol"><Icon name="disk" size={22}/></span><strong>nasctl</strong><span>我的空间</span></button><div class="topbar-actions"><span class="system-status"><span class="status-dot" class:offline={!snapshot || !['normal','maintenance'].includes(snapshot?.mode?.mode)}></span>{snapshot ? modeLabels[snapshot.mode?.mode] || '状态未知' : '正在连接'}</span><span class="topbar-divider"></span><button class="icon-button" aria-label={theme === 'light' ? '切换深色模式' : '切换浅色模式'} onclick={toggleTheme}><Icon name={theme === 'light' ? 'moon' : 'sun'} size={18}/></button>{#if auth.required}<button class="text-button" disabled={authPending} onclick={logout}>退出登录</button>{/if}{#if auth.user_id}<AccountPassword {auth} oncomplete={checkAuth}/>{:else}<span class="avatar" aria-label="本地操作者">N</span>{/if}</div></header>
   <main id="content" class="desktop-workspace" tabindex="-1" aria-label="NAS 桌面">
@@ -137,7 +137,7 @@
         {:else if frame.id === 'files'}<Files {readOnly} agent={auth.principal === 'ai'} searchRequest={fileSearch}/>
         {:else if frame.id === 'jobs'}<Jobs/>
         {:else if frame.id === 'settings'}<Settings onchange={refresh} {auth} onaccountschange={checkAuth}/>
-        {:else if frame.id === 'album'}<Album {readOnly} canConfigure={auth.can_manage_device!==false}/>
+        {:else if frame.id === 'album'}<Album {readOnly} ondesktop={desktop} canConfigure={auth.can_manage_device!==false}/>
         {:else if frame.id === 'backup'}<Backup {readOnly}/>{/if}
       </AppWindow>
     {/each}

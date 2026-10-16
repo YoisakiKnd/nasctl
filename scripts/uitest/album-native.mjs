@@ -12,7 +12,7 @@ const button=(label,scope=d)=>[...scope.querySelectorAll('button')].find((node)=
 function input(label,value){const node=d.querySelector(`[aria-label="${label}"]`);check(node,'input '+label);node.value=value;node.dispatchEvent(new w.Event(node.tagName==='SELECT'?'change':'input',{bubbles:true}));}
 w.fetch=request;w.AbortController=AbortController;w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
 w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
-async function manage(){button('管理相册').click();await delay(0);await wait(()=>d.querySelector('.album-directory-form')&&!button('关闭',d.querySelector('dialog')).disabled,'local configuration dialog');}
+async function manage(){button('相册更多操作').click();await delay(0);button('管理相册').click();await delay(0);await wait(()=>d.querySelector('.album-directory-form')&&!button('关闭',d.querySelector('dialog')).disabled,'local configuration dialog');}
 try{
  const state=await(await request('/api/v1/album/status')).json();check(state.mode==='local'&&state.connected&&state.index_ready,'native reader uses the existing local index');
  w.eval(await(await request('/app.js')).text());await wait(()=>d.querySelectorAll('.album-tile').length===48,'native gallery');

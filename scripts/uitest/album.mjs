@@ -20,7 +20,7 @@ try{
   const state=await(await request('/api/v1/album/status')).json();check(state.configured&&state.connected,'real albumctl connection works with backend-only credential');
   check(!JSON.stringify(state).includes('nasctl-disposable-album-token'),'album credential is absent from status');
   w.eval(await(await request('/app.js')).text());await wait(()=>tiles().length===48&&!d.querySelector('.loading-state'),'48-item gallery page');
-  check(!d.querySelector('.photo-filter-options')&&!d.querySelector('.album-tile-info'),'photos lead the library; advanced filters and file metadata stay out of the grid');
+  check(!d.querySelector('.album-filters')&&!d.querySelector('.photo-library-heading')&&!d.querySelector('.photo-filter-options')&&!d.querySelector('.album-tile-info'),'photos lead the library; advanced filters and file metadata stay out of the grid');
   check(d.querySelectorAll('.photo-month').length===2,'photos are grouped by capture month');
   button('相簿').click();await wait(()=>d.querySelector('.photo-album'),'album navigation');
   check(d.querySelector('.photo-album strong').textContent==='Fixture Photos','configured photo folders appear as albums');
@@ -30,12 +30,20 @@ try{
   const first=d.querySelector('dialog .album-detail-preview img,dialog .album-detail-preview video').getAttribute('src');
   d.querySelector('dialog').dispatchEvent(new w.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));
   await wait(()=>d.querySelector('dialog .album-detail-preview img,dialog .album-detail-preview video')?.getAttribute('src')&&d.querySelector('dialog .album-detail-preview img,dialog .album-detail-preview video').getAttribute('src')!==first,'keyboard opens next photo');
+  const imageButton=d.querySelector('.photo-image-toggle');check(imageButton,'photo has touch browsing surface');
+  imageButton.click();await delay(0);check(d.querySelector('dialog').classList.contains('photo-immersive')&&button('关闭对话框').closest('.dialog-heading').inert,'tap hides chrome and removes hidden controls from keyboard focus');
+  imageButton.click();await delay(0);check(!d.querySelector('dialog').classList.contains('photo-immersive'),'second tap restores chrome');
+  const swipe=(dx,dy)=>{const node=d.querySelector('.photo-image-toggle');node.dispatchEvent(new w.MouseEvent('pointerdown',{clientX:180,clientY:180,bubbles:true}));node.dispatchEvent(new w.MouseEvent('pointerup',{clientX:180+dx,clientY:180+dy,bubbles:true}));if(Math.abs(dx)>Math.abs(dy))node.click();};
+  const beforeSwipe=d.querySelector('.photo-image-toggle img').getAttribute('src');swipe(10,100);await delay(0);check(d.querySelector('.photo-image-toggle img').getAttribute('src')===beforeSwipe,'vertical gesture does not switch photos');
+  swipe(-100,5);await wait(()=>d.querySelector('.photo-image-toggle img')?.getAttribute('src')!==beforeSwipe,'swipe left opens next photo');check(!d.querySelector('dialog').classList.contains('photo-immersive'),'swipe does not accidentally hide chrome');
+  swipe(100,5);await wait(()=>d.querySelector('.photo-image-toggle img')?.getAttribute('src')===beforeSwipe,'swipe right returns');
   button('上一张').click();await wait(()=>d.querySelector('dialog .album-detail-preview img,dialog .album-detail-preview video')?.getAttribute('src')===first,'previous photo returns');
   button('照片信息').click();await wait(()=>d.querySelector('.photo-info'),'information opens on demand');
   close();await wait(()=>!d.querySelector('dialog'),'viewer closes');
   check([...d.querySelectorAll('.album-frame img')].every((image)=>/^\/api\/v1\/album\/media\/\d+\/thumb$/.test(image.getAttribute('src'))),'all thumbnail URLs use the console origin');
   const thumb=await request(d.querySelector('.album-frame img').getAttribute('src'));check(thumb.ok&&thumb.headers.get('content-type').startsWith('image/'),'real cached/placeholder thumbnail is proxied');await thumb.arrayBuffer();
   // Editing an unapplied filter must not combine it with an existing cursor.
+  button('搜索照片').click();await wait(()=>d.querySelector('.album-filters'),'search opens on demand');
   input('input[aria-label="搜索相册"]','<img');await delay(0);button('下一页').click();
   await wait(()=>tiles().length===8&&!d.querySelector('.loading-state'),'pagination uses applied filters, not the unsaved search');
   button('上一页').click();await wait(()=>tiles().length===48&&!d.querySelector('.loading-state'),'previous cursor restores gallery');
@@ -55,6 +63,12 @@ try{
   check(d.querySelector('dialog').textContent.includes('原文件暂不可用')&&!d.querySelector('dialog a[download]'),'missing original keeps thumbnail and hides unusable download');close();await wait(()=>!d.querySelector('dialog'),'missing detail closes');
   input('input[aria-label="搜索相册"]','');const kind=d.querySelector('select[aria-label="相册类型"]');kind.value='video';kind.dispatchEvent(new w.Event('change',{bubbles:true}));await apply();
   await wait(()=>tiles().length===1&&!d.querySelector('.loading-state'),'video filter');tiles()[0].click();await wait(()=>d.querySelector('dialog video'),'video uses native browser controls');check(d.querySelector('dialog video').getAttribute('src').endsWith('/raw'),'video streams through the authenticated proxy');close();
+  button('全部照片').click();await wait(()=>tiles().length===48&&!d.querySelector('.loading-state'),'return to all photos');
+  w.innerWidth=390;w.innerHeight=844;w.dispatchEvent(new w.Event('resize'));await delay(0);
+  check(d.querySelector('.desktop-shell.mobile-photo')&&d.querySelector('.photo-app.mobile'),'phone layout uses a full-screen photo shell');
+  button('返回 NAS 桌面').click();await delay(0);check(!d.querySelector('.desktop-shell.mobile-photo')&&d.querySelector('.photo-app.window-hidden'),'return to NAS restores desktop navigation and minimizes album');
+  w.location.hash='album';await wait(()=>d.querySelector('.desktop-shell.mobile-photo'),'reopen minimized photo app');
+  w.innerWidth=1024;w.dispatchEvent(new w.Event('resize'));await delay(0);check(!d.querySelector('.desktop-shell.mobile-photo'),'desktop window layout returns after phone breakpoint');
   const finalJobs=(await(await request('/api/v1/jobs?limit=200')).json()).jobs.map((job)=>job.id);check(JSON.stringify(initialJobs)===JSON.stringify(finalJobs),'album browsing creates no background jobs');
   check(errors.length===0,'no DOM errors: '+errors.join('; '));console.log('Integrated album flows passed through the real read-only albumctl service. Codec playback is a separate check.');
 }finally{dom.window.close();}
