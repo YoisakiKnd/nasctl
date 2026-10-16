@@ -62,7 +62,7 @@ done
   echo 'Verify inside this directory: sha256sum -c SHA256SUMS'
   echo 'Install the single nasctl binary; album processing runs as `nasctl album` on demand.'
   echo 'Follow docs/DEPLOYMENT.md for first setup, permissions and upgrades.'
-  echo 'Upgrading from 0.2.x or 0.1.x: read docs/UPGRADE.md first; albumctl is now nasctl album.'
+  echo 'Upgrading: read docs/UPGRADE.md. From 0.3.x only the binary changes; from 0.2.x or earlier, albumctl became nasctl album.'
   if [[ -n ${RELEASE_VERSION:-} ]]; then
     echo "Release-version build: $nasctl_version. Publication is controlled by the release workflow."
   else

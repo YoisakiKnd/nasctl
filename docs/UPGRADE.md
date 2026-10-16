@@ -3,6 +3,105 @@
 本文按版本记录需要手工处理的变化。通用的检查点、升级和回滚原则见
 [DEPLOYMENT.md](DEPLOYMENT.md#升级与检查点)，状态包细节见 [STATE-BACKUPS.md](STATE-BACKUPS.md)。
 
+跨多个版本升级时，从当前版本开始按顺序阅读各节；可以一次直接安装最新程序，但要完成
+途经各节里的手工步骤。例如 0.2.x 升级到 0.4.0：先按“0.2.x / 0.1.x → 0.3.0”处理 albumctl
+合并和配置，再看“0.3.x → 0.4.0”。
+
+| 当前版本 | 需要阅读 |
+| --- | --- |
+| 0.3.x | [0.3.x → 0.4.0](#03x--040) |
+| 0.2.x、0.1.x | [0.2.x / 0.1.x → 0.3.0](#02x--01x--030)，然后 [0.3.x → 0.4.0](#03x--040) |
+
+## 0.3.x → 0.4.0
+
+这一版**没有不兼容的配置或数据变化**，替换程序并重启即可。下面列出需要留意的行为变化。
+
+### 变化一览
+
+| 变化 | 影响 | 需要做什么 |
+| --- | --- | --- |
+| 大文件传输改为“30 秒无进展才断开” | 超过 60 秒的下载、视频播放不再被 `server.write_timeout` 切断 | 无；如果前面有反向代理，见下文“反向代理” |
+| 新增文件夹打包下载 `GET /api/v1/files/archive` | 下载时长取决于文件夹大小，占用一个传输名额 | 无；上限沿用 `hub.files` 的 `copy_max_entries` 和 `copy_max_bytes` |
+| “保持登录 30 天” | 勾选后会话写入 `state_dir/remembered-sessions.json` | 无；不想提供这个选项时见下文 |
+| API 报错改为中文 | `message` 字段变为中文，英文原文移到 `detail` | 自己写的脚本请改为判断 `error` 字段 |
+| WebDAV 目录请求带末尾 `/` | 兼容 nginx 的 WebDAV 模块 | 无；个别服务端若因此报错，详情里会显示具体请求 |
+| 新增公开的应用清单和图标 | `/manifest.webmanifest`、`/icon-*.png`、`/apple-touch-icon.png` 无需登录 | 无；内容不含私有信息 |
+
+配置、账号、状态库、相册索引（schema 2）和追番库（schema 5）都没有改变。
+
+### 升级步骤
+
+**1. 下载并校验**（以 arm64 为例）
+
+```sh
+sha256sum -c nasctl-linux-arm64.tar.gz.sha256
+tar -xzf nasctl-linux-arm64.tar.gz
+cd nasctl-linux-arm64
+sha256sum -c SHA256SUMS
+```
+
+**2. 保留旧程序，建立检查点**
+
+```sh
+mkdir -p ~/nasctl-0.3-rollback
+sudo cp -a /usr/local/bin/nasctl ~/nasctl-0.3-rollback/
+sudo systemctl stop nasctl-web.service
+sudo /usr/local/bin/nasctl --config /etc/albumctl/config.toml state backup \
+  --package /mnt/backup-private/nasctl-state/before-0.4.0 --confirm
+sudo /usr/local/bin/nasctl --config /etc/albumctl/config.toml --json state verify \
+  --package /mnt/backup-private/nasctl-state/before-0.4.0
+```
+
+如果在用照片保险箱，状态包不包含保险箱照片，请按 [PHOTO-VAULT.md](PHOTO-VAULT.md#存储与备份)
+另行备份。
+
+**3. 替换程序并启动**
+
+```sh
+sudo install -m 755 ./nasctl /usr/local/bin/nasctl.new
+sudo -u nasctl /usr/local/bin/nasctl.new --config /etc/albumctl/config.toml doctor
+sudo mv /usr/local/bin/nasctl.new /usr/local/bin/nasctl
+sudo systemctl start nasctl-web.service
+nasctl version   # 应显示 nasctl 0.4.0
+```
+
+systemd 单元与 0.3.0 相同，不需要更新。
+
+**4. 验证**
+
+- 浏览器刷新后显示新界面（右上角头像点开是菜单），无需清理缓存；
+- 选中一个小文件夹点“打包下载”，得到可以打开的 ZIP；
+- 下载一个需要超过一分钟的大文件，确认中途不再中断；
+- 如果用 WebDAV 备份，到“管理后台 → 备份”点“测试连接”。
+
+### 反向代理
+
+如果通过 nginx、Caddy 等反向代理访问 nasctl，长时间下载和文件夹打包还受代理自身超时和缓冲
+限制。以 nginx 为例，建议对 nasctl 的站点设置：
+
+```nginx
+proxy_read_timeout 300s;     # 打包大文件夹时第一个字节前可能需要扫描目录
+proxy_buffering off;         # 边读边发，避免代理把整个文件缓存到磁盘
+client_max_body_size 0;      # 上传大小由 nasctl 的 upload_max_bytes 控制
+```
+
+### “保持登录”
+
+登录页的“保持登录 30 天”默认不勾选。勾选后，只有 Cookie 的 SHA-256 摘要、账号 ID、账号版本
+和到期时间写入 `state_dir/remembered-sessions.json`，状态备份不包含它。需要让所有人立即重新
+登录时，停止服务后删除这个文件再启动。改密码、改角色、停用或删除账号会自动让相关会话失效。
+
+### 回滚到 0.3.x
+
+```sh
+sudo systemctl stop nasctl-web.service
+sudo cp -a ~/nasctl-0.3-rollback/nasctl /usr/local/bin/nasctl
+sudo systemctl start nasctl-web.service
+```
+
+0.3.x 不认识 `remembered-sessions.json`，会忽略它，所有人需要重新登录；再次升级到 0.4.0 后，
+未过期的保持登录会话会恢复。其他数据无需处理。
+
 ## 0.2.x / 0.1.x → 0.3.0
 
 0.2.0 与 0.1.x 的迁移步骤相同；文中的“旧版”指当前运行的 0.2.x 或 0.1.x。

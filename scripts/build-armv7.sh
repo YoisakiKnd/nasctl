@@ -43,7 +43,7 @@ else
     BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 fi
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
-VERSION=$(cat VERSION 2>/dev/null || echo 0.3.0)
+VERSION=$(cat VERSION 2>/dev/null || echo 0.4.0)
 
 LDFLAGS="-s -w \
  -X github.com/YoisakiKnd/nasctl/internal/buildinfo.Version=$VERSION \
