@@ -1,4 +1,4 @@
-// Package cli implements the albumctl command line.
+// Package cli implements `nasctl album`, the bounded album processing commands.
 //
 // Every verb is deliberately small, bounded and reversible. There is no verb
 // that deletes an original, none that renames one, none that starts an
@@ -28,7 +28,6 @@ import (
 	"github.com/YoisakiKnd/nasctl/internal/logx"
 	"github.com/YoisakiKnd/nasctl/internal/resource"
 	"github.com/YoisakiKnd/nasctl/internal/scan"
-	"github.com/YoisakiKnd/nasctl/internal/server"
 	"github.com/YoisakiKnd/nasctl/internal/source"
 	"github.com/YoisakiKnd/nasctl/internal/store"
 	"github.com/YoisakiKnd/nasctl/internal/taskctl"
@@ -36,25 +35,24 @@ import (
 	"github.com/YoisakiKnd/nasctl/internal/webstate"
 )
 
-// Usage is printed for `albumctl help`.
-const Usage = `albumctl — a small, careful photo index for a small machine.
+// Usage is printed for `nasctl album help`.
+const Usage = `nasctl album — a small, careful photo index for a small machine.
 
-  albumctl status                        what is running, what resources remain,
-                                         and how much work is waiting
-  albumctl scan    --collection CODE [--limit N] [--dry-run]
-                                         index a collection, with an explicit cap
-  albumctl thumbs  --collection CODE [--limit N] --max-runtime DURATION
-                                         generate thumbnails, one file at a time
-  albumctl pause   [--reason TEXT]       stop heavy tasks, durably
-  albumctl resume  [--force]             clear a pause or a pressure trip
-  albumctl doctor                        read-only checks of config, mounts,
-                                         permissions, space and resource limits
-  albumctl cache-report                  what the thumbnail cache holds
-  albumctl cache-gc --max-age D [--dry-run]
-                                         remove stale thumbnails from albumctl's
-                                         own cache directory only
-  albumctl serve                         run the read-only web service
-  albumctl version                       build information
+  nasctl album status                 what is running, what resources remain,
+                                      and how much work is waiting
+  nasctl album scan --collection CODE [--limit N] [--dry-run]
+                                      index a collection, with an explicit cap
+  nasctl album thumbs --collection CODE [--limit N] --max-runtime DURATION
+                                      generate thumbnails, one file at a time
+  nasctl album pause [--reason TEXT]  stop heavy tasks, durably
+  nasctl album resume [--force]       clear a pause or a pressure trip
+  nasctl album doctor                 read-only checks of config, mounts,
+                                      permissions, space and resource limits
+  nasctl album cache-report           what the thumbnail cache holds
+  nasctl album cache-gc --max-age D [--dry-run]
+                                      remove stale thumbnails from the album's
+                                      own cache directory only
+  nasctl album version                build information
 
 Browsing never starts work. There is no command that scans or generates
 anything without an explicit --limit and, for thumbs, --max-runtime.
@@ -125,7 +123,7 @@ func Run(args []string, env Env) int {
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album: %v\n", err)
 		return 1
 	}
 
@@ -149,12 +147,10 @@ func Run(args []string, env Env) int {
 		return cmdCacheReport(ctx, cfg, env)
 	case "cache-gc":
 		return cmdCacheGC(ctx, cfg, env, rest)
-	case "serve", "server":
-		return cmdServe(ctx, cfg, env)
 	case "collections":
 		return cmdCollections(ctx, cfg, env)
 	default:
-		fmt.Fprintf(env.Stderr, "albumctl: unknown command %q\n\n%s", cmd, Usage)
+		fmt.Fprintf(env.Stderr, "nasctl album: unknown command %q\n\n%s", cmd, Usage)
 		return 2
 	}
 }
@@ -171,7 +167,7 @@ func signalContext() (context.Context, context.CancelFunc) {
 	go func() {
 		select {
 		case <-ch:
-			fmt.Fprintln(os.Stderr, "\nalbumctl: stop requested; finishing the file in flight")
+			fmt.Fprintln(os.Stderr, "\nnasctl album: stop requested; finishing the file in flight")
 			cancel()
 		case <-ctx.Done():
 		}
@@ -245,7 +241,7 @@ func cmdStatus(ctx context.Context, cfg *config.Config, env Env, args []string) 
 		return 2
 	}
 	if fs.NArg() > 0 {
-		fmt.Fprintf(env.Stderr, "albumctl status: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(env.Stderr, "nasctl album status: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
 	if *asJSON {
@@ -253,7 +249,7 @@ func cmdStatus(ctx context.Context, cfg *config.Config, env Env, args []string) 
 	}
 	st, err := openStore(cfg, true)
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album: %v\n", err)
 		return 1
 	}
 	defer st.Close()
@@ -282,7 +278,7 @@ func cmdStatus(ctx context.Context, cfg *config.Config, env Env, args []string) 
 			time.Unix(pr.At, 0).Format(time.RFC3339))
 		fmt.Fprintf(w, "             %s\n", pr.Detail)
 		fmt.Fprintf(w, "             %s\n", pr.Snapshot)
-		fmt.Fprintf(w, "             automatic restart is disabled; `albumctl resume` clears this\n")
+		fmt.Fprintf(w, "             automatic restart is disabled; `nasctl album resume` clears this\n")
 	}
 
 	tasks, err := st.RunningTasks(ctx)
@@ -315,11 +311,11 @@ func cmdStatus(ctx context.Context, cfg *config.Config, env Env, args []string) 
 	fmt.Fprintf(w, "\ncollections and pending work\n")
 	cols, err := st.Collections(ctx)
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album: %v\n", err)
 		return 1
 	}
 	if len(cols) == 0 {
-		fmt.Fprintf(w, "  none indexed yet; run `albumctl scan --collection CODE --limit N`\n")
+		fmt.Fprintf(w, "  none indexed yet; run `nasctl album scan --collection CODE --limit N`\n")
 	}
 	for _, c := range cols {
 		probePend, thumbPend, _ := st.CountPending(ctx, c.ID)
@@ -530,7 +526,7 @@ func cmdStatusJSON(ctx context.Context, cfg *config.Config, env Env) int {
 	code := 0
 	if st, err := openStore(cfg, true); err != nil {
 		doc.Web.Note = ""
-		fmt.Fprintf(env.Stderr, "albumctl status --json: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album status --json: %v\n", err)
 		code = 1
 	} else {
 		defer st.Close()
@@ -652,7 +648,7 @@ func cmdStatusJSON(ctx context.Context, cfg *config.Config, env Env) int {
 	enc := json.NewEncoder(env.Stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(doc); err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl status --json: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album status --json: %v\n", err)
 		return 1
 	}
 	return code
@@ -669,14 +665,14 @@ func cmdScan(ctx context.Context, cfg *config.Config, env Env, args []string) in
 		return 2
 	}
 	if *collection == "" {
-		fmt.Fprintln(env.Stderr, "albumctl scan: --collection is required")
+		fmt.Fprintln(env.Stderr, "nasctl album scan: --collection is required")
 		return 2
 	}
 	if !*dryRun && *limit <= 0 {
 		fmt.Fprintf(env.Stderr,
-			"albumctl scan: refusing to run without --limit.\n"+
+			"nasctl album scan: refusing to run without --limit.\n"+
 				"An uncapped first run over a 5000 file library is exactly the load this tool exists to avoid.\n"+
-				"Start with --limit 50, check `albumctl status`, then raise it.\n")
+				"Start with --limit 50, check `nasctl album status`, then raise it.\n")
 		return 2
 	}
 
@@ -685,7 +681,7 @@ func cmdScan(ctx context.Context, cfg *config.Config, env Env, args []string) in
 
 	st, err := openStore(cfg, false)
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album: %v\n", err)
 		return 1
 	}
 	defer st.Close()
@@ -700,7 +696,7 @@ func cmdScan(ctx context.Context, cfg *config.Config, env Env, args []string) in
 		},
 	})
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl scan: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album scan: %v\n", err)
 		return 1
 	}
 	fmt.Fprint(env.Stdout, res.HumanReport())
@@ -724,14 +720,14 @@ func cmdThumbs(ctx context.Context, cfg *config.Config, env Env, args []string) 
 		return 2
 	}
 	if *collection == "" {
-		fmt.Fprintln(env.Stderr, "albumctl thumbs: --collection is required")
+		fmt.Fprintln(env.Stderr, "nasctl album thumbs: --collection is required")
 		return 2
 	}
 	if *limit <= 0 || *maxRuntime <= 0 {
 		fmt.Fprintf(env.Stderr,
-			"albumctl thumbs: --limit and --max-runtime are both required.\n"+
+			"nasctl album thumbs: --limit and --max-runtime are both required.\n"+
 				"A thumbnail run is a bounded task; an unbounded one is what took the machine down before.\n"+
-				"Start with --limit 10 --max-runtime 10m and watch `albumctl status`.\n")
+				"Start with --limit 10 --max-runtime 10m and watch `nasctl album status`.\n")
 		return 2
 	}
 
@@ -740,7 +736,7 @@ func cmdThumbs(ctx context.Context, cfg *config.Config, env Env, args []string) 
 
 	st, err := openStore(cfg, false)
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album: %v\n", err)
 		return 1
 	}
 	defer st.Close()
@@ -757,7 +753,7 @@ func cmdThumbs(ctx context.Context, cfg *config.Config, env Env, args []string) 
 		},
 	})
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl thumbs: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album thumbs: %v\n", err)
 		if rep.TaskID != 0 {
 			fmt.Fprint(env.Stdout, rep.ResourceReport())
 		}
@@ -820,17 +816,17 @@ func cmdPause(ctx context.Context, cfg *config.Config, env Env, args []string) i
 	}
 	st, err := openStore(cfg, false)
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album: %v\n", err)
 		return 1
 	}
 	defer st.Close()
 
 	r := orNone(*reason)
 	if *reason == "" {
-		r = "set by albumctl pause"
+		r = "set by nasctl album pause"
 	}
 	if err := st.Pause(ctx, r, "cli"); err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl pause: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album pause: %v\n", err)
 		return 1
 	}
 	// The pause is written to the index, so it survives a reboot, a crash and a
@@ -838,7 +834,7 @@ func cmdPause(ctx context.Context, cfg *config.Config, env Env, args []string) i
 	// boundary and stops there.
 	fmt.Fprintf(env.Stdout, "Paused. Heavy tasks will not start, and any run in progress stops at the next file boundary.\n")
 	fmt.Fprintf(env.Stdout, "Reason recorded: %s\n", r)
-	fmt.Fprintf(env.Stdout, "Browsing is unaffected. Clear it with `albumctl resume`.\n")
+	fmt.Fprintf(env.Stdout, "Browsing is unaffected. Clear it with `nasctl album resume`.\n")
 	return 0
 }
 
@@ -850,7 +846,7 @@ func cmdResume(ctx context.Context, cfg *config.Config, env Env, args []string) 
 	}
 	st, err := openStore(cfg, false)
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album: %v\n", err)
 		return 1
 	}
 	defer st.Close()
@@ -859,7 +855,7 @@ func cmdResume(ctx context.Context, cfg *config.Config, env Env, args []string) 
 	pr, _ := st.Pressure(ctx)
 
 	if err := st.Resume(ctx); err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl resume: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album resume: %v\n", err)
 		return 1
 	}
 	if ps.Paused {
@@ -876,12 +872,12 @@ func cmdResume(ctx context.Context, cfg *config.Config, env Env, args []string) 
 					time.Unix(pr.At, 0).Format(time.RFC3339), cfg.Guard.CooldownAfterTrip.D(), left.Round(time.Second))
 				fmt.Fprintf(env.Stdout, "It was: %s\n", pr.Detail)
 				fmt.Fprintf(env.Stdout,
-					"Check the machine first. Then run `albumctl resume --force` to clear it early.\n")
+					"Check the machine first. Then run `nasctl album resume --force` to clear it early.\n")
 				return 0
 			}
 		}
 		if err := st.ClearPressure(ctx); err != nil {
-			fmt.Fprintf(env.Stderr, "albumctl resume: %v\n", err)
+			fmt.Fprintf(env.Stderr, "nasctl album resume: %v\n", err)
 			return 1
 		}
 		fmt.Fprintf(env.Stdout, "Pressure trip cleared (%s).\n", orNone(pr.Reason))
@@ -1079,10 +1075,10 @@ func cmdDoctor(ctx context.Context, cfg *config.Config, env Env, args []string) 
 	if cap.CgroupIsolation {
 		report(true, "cgroup v2 isolation is available: %s", orNone(cap.CgroupReason))
 		if already, err := cm.EffectiveWorkerLimitBytes(); err == nil && already > 0 {
-			report(true, "an enclosing unit already imposes a memory ceiling of %s on albumctl",
+			report(true, "an enclosing unit already imposes a memory ceiling of %s on the album task",
 				humanBytes(already))
 		} else if err == nil {
-			warn("no memory ceiling is set on albumctl's own cgroup; the systemd unit is expected to set MemoryMax")
+			warn("no memory ceiling is set on this process's own cgroup; the systemd unit is expected to set MemoryMax")
 		}
 	} else {
 		report(false, "cgroup v2 isolation is not available: %s", orNone(cap.CgroupReason))
@@ -1126,17 +1122,6 @@ func cmdDoctor(ctx context.Context, cfg *config.Config, env Env, args []string) 
 			cfg.Decode.PerFileTimeout.D(), cfg.Decode.GracePeriod.D())
 	}
 
-	// 6. The bind address, because a wrong one is a silent exposure.
-	if err := server.CheckBind(cfg); err != nil {
-		report(false, "web bind address: %v", err)
-	} else {
-		report(true, "web bind address %s is loopback, private or Tailscale", cfg.Server.Bind)
-	}
-	if cfg.Server.Token == "" {
-		warn("no web token is configured; access control rests entirely on the bind address and the " +
-			"network in front of it. A private address is not a promise that every device on it is yours")
-	}
-
 	if *asJSON {
 		doc := struct {
 			Version      string `json:"version"`
@@ -1163,7 +1148,7 @@ func cmdDoctor(ctx context.Context, cfg *config.Config, env Env, args []string) 
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(doc); err != nil {
-			fmt.Fprintf(env.Stderr, "albumctl doctor --json: %v\n", err)
+			fmt.Fprintf(env.Stderr, "nasctl album doctor --json: %v\n", err)
 			return 1
 		}
 	} else {
@@ -1195,12 +1180,12 @@ func cmdCacheReport(ctx context.Context, cfg *config.Config, env Env) int {
 	w := env.Stdout
 	files, bytes, err := fsutil.DirUsage(cfg.Paths.CacheDir)
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl cache-report: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album cache-report: %v\n", err)
 		return 1
 	}
 	st, err := openStore(cfg, true)
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album: %v\n", err)
 		return 1
 	}
 	defer st.Close()
@@ -1232,7 +1217,7 @@ func cmdCacheReport(ctx context.Context, cfg *config.Config, env Env) int {
 		avg = bytes / int64(files)
 	}
 	fmt.Fprintf(w, "average size:     %s\n", humanBytes(avg))
-	fmt.Fprintf(w, "\nThis command reports only. Pruning is a separate, explicit act: `albumctl cache-gc`.\n")
+	fmt.Fprintf(w, "\nThis command reports only. Pruning is a separate, explicit act: `nasctl album cache-gc`.\n")
 	return 0
 }
 
@@ -1252,19 +1237,19 @@ func cmdCacheGC(ctx context.Context, cfg *config.Config, env Env, args []string)
 	// and there is no code path here that can reach a media directory.
 	root := filepath.Clean(cfg.Paths.CacheDir)
 	if _, err := os.Stat(root); err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl cache-gc: %s is not readable: %v\n", root, err)
+		fmt.Fprintf(env.Stderr, "nasctl album cache-gc: %s is not readable: %v\n", root, err)
 		return 1
 	}
 	if cfg.Paths.StateDir == "" || !fsutil.IsWithin(cfg.Paths.StateDir, root) {
 		fmt.Fprintf(env.Stderr,
-			"albumctl cache-gc: refusing to prune %s because it is not inside the state directory %s\n",
+			"nasctl album cache-gc: refusing to prune %s because it is not inside the state directory %s\n",
 			root, cfg.Paths.StateDir)
 		return 1
 	}
 	for _, c := range cfg.Collections {
 		if fsutil.IsWithin(c.Root, root) {
 			fmt.Fprintf(env.Stderr,
-				"albumctl cache-gc: refusing to prune %s because it is inside media collection %s\n", root, c.Code)
+				"nasctl album cache-gc: refusing to prune %s because it is inside media collection %s\n", root, c.Code)
 			return 1
 		}
 	}
@@ -1272,21 +1257,21 @@ func cmdCacheGC(ctx context.Context, cfg *config.Config, env Env, args []string)
 	lock, err := taskctl.Acquire(cfg.Paths.LockDir, "thumbs")
 	if err != nil {
 		fmt.Fprintf(env.Stderr,
-			"albumctl cache-gc: refusing to run while a thumbnail task holds its lock (%v)\n", err)
+			"nasctl album cache-gc: refusing to run while a thumbnail task holds its lock (%v)\n", err)
 		return 1
 	}
 	defer lock.Release()
 
 	st, err := openStore(cfg, true)
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album: %v\n", err)
 		return 1
 	}
 	defer st.Close()
 
 	referenced, err := st.AllThumbPaths(ctx, cfg.Paths.CacheDir, cfg.Decode.ThumbMaxEdge, cfg.Cache.ShardDepth)
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl cache-gc: cannot read the index: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album cache-gc: cannot read the index: %v\n", err)
 		return 1
 	}
 	refSet := make(map[string]struct{}, len(referenced))
@@ -1334,7 +1319,7 @@ func cmdCacheGC(ctx context.Context, cfg *config.Config, env Env, args []string)
 		return nil
 	})
 	if err2 != nil {
-		fmt.Fprintf(env.Stderr, "albumctl cache-gc: %v\n", err2)
+		fmt.Fprintf(env.Stderr, "nasctl album cache-gc: %v\n", err2)
 		return 1
 	}
 	verb := "removed"
@@ -1342,52 +1327,20 @@ func cmdCacheGC(ctx context.Context, cfg *config.Config, env Env, args []string)
 		verb = "would remove"
 	}
 	fmt.Fprintf(w, "%s %d file(s), %s; kept %d.\n", verb, removed, humanBytes(freed), kept)
-	fmt.Fprintf(w, "Only files inside the albumctl cache directory were considered. No media file was touched.\n")
-	return 0
-}
-
-// ---- serve --------------------------------------------------------------
-
-func cmdServe(ctx context.Context, cfg *config.Config, env Env) int {
-	if err := server.CheckBind(cfg); err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl serve: %v\n", err)
-		return 1
-	}
-	log := openLog(cfg, false)
-	defer log.Close()
-
-	// The web service opens the index read-only. It is not a policy, it is a
-	// property of the handle: SQLite is opened with query_only, so even a bug in
-	// a handler cannot write.
-	st, err := openStore(cfg, true)
-	if err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl serve: %v\n", err)
-		return 1
-	}
-	defer st.Close()
-
-	srv, err := server.New(cfg, st, log)
-	if err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl serve: %v\n", err)
-		return 1
-	}
-	if err := server.Serve(ctx, cfg, srv, env.Stderr); err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl serve: %v\n", err)
-		return 1
-	}
+	fmt.Fprintf(w, "Only files inside the album cache directory were considered. No media file was touched.\n")
 	return 0
 }
 
 func cmdCollections(ctx context.Context, cfg *config.Config, env Env) int {
 	st, err := openStore(cfg, true)
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album: %v\n", err)
 		return 1
 	}
 	defer st.Close()
 	cols, err := st.Collections(ctx)
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "albumctl: %v\n", err)
+		fmt.Fprintf(env.Stderr, "nasctl album: %v\n", err)
 		return 1
 	}
 	for _, c := range cols {

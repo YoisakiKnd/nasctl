@@ -5,12 +5,12 @@
 
 ## 备份
 
-先停止 nasctl Web、albumctl 扫描／处理组件及所有写状态的独立 CLI。旧版程序不参与新
+先停止 nasctl Web、`nasctl album` 扫描／处理任务及所有写状态的独立 CLI。旧版程序不参与新
 锁协议，必须主动停止。备份期间也不要手工编辑配置、数据库或目录配置。
 
 ```sh
 sudo systemctl stop nasctl-web.service
-# 同时停止自己启动的 albumctl 任务及其他 nasctl 写入命令。
+# 同时停止自己启动的 nasctl album 任务及其他 nasctl 写入命令。
 sudo install -d -m 700 /mnt/backup-private/nasctl-state
 nasctl --config /etc/albumctl/config.toml state backup \
   --package /mnt/backup-private/nasctl-state/before-upgrade --confirm

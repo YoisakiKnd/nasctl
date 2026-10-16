@@ -1,5 +1,7 @@
 # OneCloud Hub — stage A design
 
+> **2026-10 更新：** `albumctl` 已并入单一的 `nasctl` 二进制（`nasctl album ...`），独立的 `albumctl serve` 网页和远程相册模式已移除。下文中的 albumctl 指现在的 `nasctl album` 处理进程；隔离与资源边界不变。
+
 Read `HUB-AUDIT.md` first: it establishes what actually exists. This document is the
 design that follows from it. Stage A produces *design only* — no deployment, no
 migration, no file writes, no scheduler.

@@ -364,6 +364,7 @@ Commands:
   mode                Show or change the operating mode
   approvals           List or revoke approvals
   media               Report the IWantWatchAnime integration
+  album ...           Bounded album processing; see nasctl album help
   audit               Print recent audited actions
   version             Print the version
   help                Print this text

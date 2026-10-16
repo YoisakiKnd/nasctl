@@ -7,7 +7,7 @@ if root.parent!=Path('/run') or not re.fullmatch(r'nasctl-kernel-album-[A-Za-z0-
 if (source/'.nasctl-source-fixture').read_text()!='nasctl-kernel-source-v1\n':raise SystemExit('generated source fixture required')
 os.umask(0o077)
 for name in ['bin','photos','state','cache']:(root/name).mkdir(mode=0o750)
-for name in ['nasctl','albumctl']:
+for name in ['nasctl']:
     binary=(args.binary_dir/name).resolve()
     if not binary.is_file() or binary.stat().st_size>128<<20 or not binary.stat().st_mode&0o111:raise SystemExit('built executable fixture binaries required')
     with binary.open('rb') as src,(root/'bin'/name).open('xb') as dst:shutil.copyfileobj(src,dst,65536)

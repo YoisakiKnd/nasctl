@@ -1,7 +1,7 @@
 # 部署、升级与兼容版本回滚
 
-nasctl 面向 Linux NAS，提供 amd64、arm64、ARMv7 构建。只启动一个 nasctl 服务；
-albumctl 是按需启动的扫描／缩略图处理组件，不需要独立相册 HTTP 服务。内存按任务
+nasctl 面向 Linux NAS，提供 amd64、arm64、ARMv7 构建。只有一个 nasctl 二进制和
+一个服务；扫描／缩略图由控制台按需以 `nasctl album ...` 重新启动自身执行。内存按任务
 数量和固定流缓冲控制，文件大小不决定分配同等大小的内存。
 
 | Linux 用户空间 | Go 构建目标 |
@@ -10,8 +10,8 @@ albumctl 是按需启动的扫描／缩略图处理组件，不需要独立相�
 | aarch64／64 位 | `GOOS=linux GOARCH=arm64 CGO_ENABLED=0` |
 | ARMv7／32 位 | `GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0` |
 
-使用 go.mod 要求的 Go 1.27.1 或更新工具链，CI 固定 1.27.1。nasctl 与 albumctl 使用
-同一份源码／编译器构建，安装在同一目录。前端已嵌入；NAS 不需要 Node、Svelte 或
+使用 go.mod 要求的 Go 1.27.1 或更新工具链，CI 固定 1.27.1。只需安装一个 nasctl
+二进制。前端已嵌入；NAS 不需要 Node、Svelte 或
 Python。修改 UI 后，在开发机先运行 `npm ci --prefix frontend`、`npm run check --prefix frontend`
 和 `npm run build --prefix frontend`，再编译 Go。ARMv7 打包入口为
 `scripts/build-armv7.sh`，相同工具链与 SOURCE_DATE_EPOCH 可复验构建摘要。
@@ -44,14 +44,13 @@ Actions 产物 30 天保留期限制。`vX.Y.Z` 标签须与 VERSION 一致，�
 
 ## 全新安装
 
-以下命令只适用于全新目录。已有 albumctl 的状态应保持原所有权；让 NAS 单元使用
+以下命令只适用于全新目录。已有旧版 albumctl 的状态应保持原所有权；让 NAS 单元使用
 同一运行用户，先建立私有状态检查点。不要为了安装而递归改变原照片／视频的所有权。
 
 ```sh
 sudo useradd --system --home /var/lib/albumctl --no-create-home --shell /usr/sbin/nologin nasctl
 sudo install -d -o nasctl -g nasctl -m 750 /etc/albumctl /var/lib/albumctl /var/cache/albumctl
 sudo install -m 755 /path/to/built/nasctl /usr/local/bin/nasctl
-sudo install -m 755 /path/to/built/albumctl /usr/local/bin/albumctl
 sudo -u nasctl /usr/local/bin/nasctl --config /etc/albumctl/config.toml init \
   --state-dir /var/lib/albumctl --cache-dir /var/cache/albumctl \
   --bind 127.0.0.1:8090 --confirm
@@ -109,9 +108,9 @@ journalctl -u nasctl-web.service -n 50
 
 ## 升级与检查点
 
-1. 记录当前两个二进制的 SHA-256、源码版本、工具链、配置与单元／drop-in。准备新
+1. 记录当前二进制的 SHA-256、源码版本、工具链、配置与单元／drop-in。准备新
    二进制，先验证构建和摘要，不直接覆盖运行中的文件。
-2. 停止 nasctl、独立 albumctl 服务／任务及所有状态写入 CLI。不要删除锁文件来绕过
+2. 停止 nasctl、`nasctl album` 任务（从旧版升级时还有 albumctl 服务／任务）及所有状态写入 CLI。不要删除锁文件来绕过
    “仍在使用”的检查；旧版程序不参与新锁协议，必须主动停止。
 3. 用 `nasctl state backup --package 新私有目录 --confirm` 建立检查点，随后独立
    `state verify`，保存清单摘要。目录不在文件管理器根内，父目录 0700。旧版若无该

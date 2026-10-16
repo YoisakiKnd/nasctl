@@ -631,64 +631,11 @@ func TestCraftedNamesAreInertInJSONAndOnDisk(t *testing.T) {
 			len(under), rr3.StatusCode)
 	}
 
-	// And the renderer must never parse HTML. This is the other half of the
-	// XSS defence and the reason transporting a raw name is safe.
-	_, appjs := s.get("/app.js")
-	// The check is on the sink form used at a call or assignment site
-	// (".innerHTML" as a property access), not on the bare word: a comment
-	// saying "never innerHTML" is the opposite of a defect.
-	code := stripComments(string(appjs))
-	for _, sink := range []string{".innerHTML", ".outerHTML", ".insertAdjacentHTML",
-		"document.write(", "createContextualFragment", "eval("} {
-		if strings.Contains(code, sink) {
-			t.Errorf("the frontend uses %s; a name from the disk would then be able to introduce markup", sink)
-		}
-	}
-	if !bytes.Contains(appjs, []byte("textContent")) {
-		t.Error("the frontend never uses textContent, so it must build the DOM some other way; " +
-			"that needs to be checked against the no-markup rule")
-	}
-
 	// The file on disk must be untouched: nothing here may rewrite a name.
 	full := filepath.Join(r.Media, "names", injected)
 	if _, err := os.Stat(full); err != nil {
 		t.Errorf("the original file is no longer at its recorded name: %v", err)
 	}
-}
-
-// stripComments removes // line comments and /* */ blocks so that a rule such
-// as "never use innerHTML" can be stated in a comment without tripping a check
-// for the word itself.
-func strOrNil(p *string) string {
-	if p == nil {
-		return "(none)"
-	}
-	return *p
-}
-
-func stripComments(s string) string {
-	var out strings.Builder
-	for i := 0; i < len(s); {
-		switch {
-		case strings.HasPrefix(s[i:], "//"):
-			if j := strings.IndexByte(s[i:], '\n'); j >= 0 {
-				i += j
-			} else {
-				i = len(s)
-			}
-		case strings.HasPrefix(s[i:], "/*"):
-			j := strings.Index(s[i+2:], "*/")
-			if j < 0 {
-				i = len(s)
-			} else {
-				i += j + 4
-			}
-		default:
-			out.WriteByte(s[i])
-			i++
-		}
-	}
-	return out.String()
 }
 
 func urlQueryEscape(s string) string {
@@ -860,57 +807,6 @@ func TestStatusIsServedWithoutTouchingTheCache(t *testing.T) {
 	if !doc.Resource.ReadOnly {
 		t.Error("the service does not report itself as read-only, so an operator cannot confirm " +
 			"from outside that it holds a write-refusing index handle")
-	}
-}
-
-// TestTheEmbeddedFrontendIsServedWithoutExternalReferences checks that the
-// page loads from the binary alone and pulls nothing from the network.
-func TestTheEmbeddedFrontendIsServedWithoutExternalReferences(t *testing.T) {
-	_, s, _ := serveIndexed(t)
-
-	resp, body := s.get("/")
-	if resp.StatusCode != 200 {
-		t.Fatalf("GET / returned %d", resp.StatusCode)
-	}
-	html := string(body)
-	if !strings.Contains(html, "<html") {
-		t.Fatalf("the root path is not an HTML document: %s", truncate(html, 200))
-	}
-
-	for _, asset := range []string{"/app.css", "/app.js"} {
-		ar, _ := s.get(asset)
-		if ar.StatusCode != 200 {
-			t.Errorf("GET %s returned %d; the embedded asset is missing", asset, ar.StatusCode)
-		}
-	}
-
-	// Nothing may be fetched from the network: no analytics, no remote fonts,
-	// no map tiles, no CDN. This is a security boundary as much as an offline
-	// requirement.
-	var everything strings.Builder
-	everything.WriteString(html)
-	for _, asset := range []string{"/app.css", "/app.js"} {
-		_, b := s.get(asset)
-		everything.Write(b)
-	}
-	page := everything.String()
-	// Any absolute URL in a load position is a network dependency. The
-	// frontend also has no <img src=...> or <link href=...> pointing off-host.
-	for _, bad := range []string{"http://", "https://", "url(http", "@import", "srcset="} {
-		if strings.Contains(page, bad) {
-			t.Errorf("the frontend contains %q; the first version must load entirely from the "+
-				"binary and contact nothing", bad)
-		}
-	}
-	for _, bad := range []string{".innerHTML", "insertAdjacentHTML", "eval("} {
-		if strings.Contains(stripComments(page), bad) {
-			t.Errorf("the served frontend contains %q", bad)
-		}
-	}
-	// A missing external reference is only a problem if the page also fails to
-	// render, so the shell must be self-contained.
-	if !strings.Contains(page, "albumctl") {
-		t.Error("the served frontend does not identify itself")
 	}
 }
 
@@ -1297,4 +1193,11 @@ func TestTheRunStopsAtTheCacheCeiling(t *testing.T) {
 			t.Errorf("the cache holds %d file(s) / %d bytes, want nothing written", files, bytes)
 		}
 	})
+}
+
+func strOrNil(p *string) string {
+	if p == nil {
+		return "(none)"
+	}
+	return *p
 }

@@ -1,4 +1,5 @@
-// Package server is the read-only web service.
+// Package albumapi is the read-only album HTTP API. nasctl mounts it in process
+// behind its own authentication; it has no listener of its own.
 //
 // What this package must never do, and how that is enforced:
 //
@@ -13,25 +14,15 @@
 //   - It never streams a whole original into memory. Originals are served with
 //     http.ServeContent over an *os.File, which reads with a bounded copy
 //     buffer and answers Range requests without a full read.
-//
-// Access control is by network placement, and the service says so out loud: it
-// refuses to bind to a non-private address unless the operator opts in, and it
-// emits a warning when no token is configured. A private address is not a
-// guarantee that every device on the network is trustworthy, and the response
-// says as much rather than implying otherwise.
-package server
+package albumapi
 
 import (
 	"context"
-	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
-	"net"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -45,10 +36,7 @@ import (
 	"github.com/YoisakiKnd/nasctl/internal/store"
 )
 
-//go:embed web/*
-var webFS embed.FS
-
-// Server is the HTTP service.
+// Server is the album API handler.
 type Server struct {
 	Cfg     *config.Config
 	Store   *store.Store
@@ -90,7 +78,7 @@ func New(cfg *config.Config, st *store.Store, log *logx.Logger) (*Server, error)
 // Handler exposes the middleware-wrapped handler for tests.
 func (s *Server) Handler() http.Handler { return s.handler }
 
-// routes wires the API and the embedded assets.
+// routes wires the album read API.
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 
@@ -105,21 +93,6 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("HEAD /api/v1/media/{id}/download", s.handleStream(true))
 	mux.HandleFunc("GET /api/v1/timeline", s.handleTimeline)
 	mux.HandleFunc("GET /api/v1/cache", s.handleCache)
-
-	sub, err := fs.Sub(webFS, "web")
-	if err != nil {
-		panic("server: embedded assets are missing: " + err.Error())
-	}
-	static := http.FileServer(http.FS(sub))
-	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
-			w.Header().Set("Cache-Control", "no-cache")
-		} else if strings.HasPrefix(r.URL.Path, "/app.") {
-			w.Header().Set("Cache-Control",
-				fmt.Sprintf("public, max-age=%d", s.Cfg.Server.StaticCacheSeconds))
-		}
-		static.ServeHTTP(w, r)
-	}))
 
 	return s.middleware(mux)
 }
@@ -236,42 +209,6 @@ func (w *statusWriter) Write(p []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(p)
 	w.n += int64(n)
 	return n, err
-}
-
-// CheckBind refuses to serve on a public address unless explicitly allowed.
-//
-// "Default to my Tailscale devices only" is implemented as a check rather than
-// a comment: a typo in a bind address is a silent exposure, and this turns it
-// into a startup failure.
-func CheckBind(cfg *config.Config) error {
-	host, port, err := net.SplitHostPort(cfg.Server.Bind)
-	if err != nil {
-		return err
-	}
-	if _, err := strconv.Atoi(port); err != nil {
-		return fmt.Errorf("server.bind port %q is not numeric", port)
-	}
-	if host == "" {
-		return errors.New("server.bind has no address; refusing to listen on every interface")
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return fmt.Errorf("server.bind host %q is not an IP address; "+
-			"use the Tailscale address or 127.0.0.1 so the exposure is explicit", host)
-	}
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
-		return nil
-	}
-	// 100.64.0.0/10 is the Tailscale carrier-grade NAT range; Go's IsPrivate
-	// does not include it.
-	if ip.To4() != nil && ip.To4()[0] == 100 && ip.To4()[1] >= 64 && ip.To4()[1] <= 127 {
-		return nil
-	}
-	if cfg.Server.AllowNonPrivateBind {
-		return nil
-	}
-	return fmt.Errorf("server.bind %s is not a loopback, private or Tailscale address; "+
-		"either bind to a private address or set server.allow_non_private_bind = true to accept the exposure", ip)
 }
 
 // ---- JSON helpers -------------------------------------------------------

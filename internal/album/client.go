@@ -1,21 +1,17 @@
-// Package album is a bounded reader of an injected local handler or an explicit
-// remote album service. It never opens the index, decodes media or starts work.
+// Package album is a bounded reader of the injected local album API handler. It
+// never opens the index, decodes media or starts work.
 package album
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/YoisakiKnd/nasctl/internal/config"
 )
 
 const MaxJSONBytes = 2 << 20
@@ -31,46 +27,21 @@ func invalid(message string) error     { return &Error{400, "bad_request", messa
 func unavailable(message string) error { return &Error{502, "album_unavailable", message} }
 
 type Client struct {
-	base, token, publicURL string
-	mode                   string
-	http                   *http.Client
+	base string
+	mode string
+	http *http.Client
 }
 
-func New(cfg config.Album) (*Client, error) {
-	if cfg.APIBase == "" {
-		return nil, nil
-	}
-	if err := config.ValidateAlbumBase(cfg.APIBase); err != nil {
-		return nil, err
-	}
-	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	transport := &http.Transport{Proxy: nil, MaxIdleConns: 8, MaxIdleConnsPerHost: 4, IdleConnTimeout: 30 * time.Second, ResponseHeaderTimeout: 8 * time.Second}
-	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(address)
-		if err != nil {
-			return nil, err
-		}
-		if host == "localhost" {
-			host = "127.0.0.1"
-		}
-		return dialer.DialContext(ctx, network, net.JoinHostPort(host, port))
-	}
-	return &Client{base: strings.TrimRight(cfg.APIBase, "/"), token: cfg.Token, publicURL: cfg.PublicURL, mode: "remote", http: &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("album redirects are refused") }}}, nil
-}
 func (c *Client) Close() {
 	if c != nil {
 		c.http.CloseIdleConnections()
 	}
 }
-func (c *Client) PublicURL() string { return c.publicURL }
-func (c *Client) Mode() string      { return c.mode }
+func (c *Client) Mode() string { return c.mode }
 func (c *Client) request(ctx context.Context, method, endpoint string, headers http.Header) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, c.base+endpoint, nil)
 	if err != nil {
 		return nil, unavailable("相册连接配置无效")
-	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 	for _, name := range []string{"Range", "If-Range", "If-None-Match", "If-Modified-Since"} {
 		if value := headers.Get(name); value != "" && len(value) <= 512 {
@@ -90,8 +61,6 @@ func responseError(status int) error {
 	switch status {
 	case 400:
 		return invalid("相册筛选参数无效，或集合尚未建立索引")
-	case 401:
-		return &Error{502, "album_auth_failed", "相册服务凭据无效，请检查 hub.album.token"}
 	case 403:
 		return &Error{403, "album_refused", "相册服务拒绝读取此文件，请检查集合挂载和原文件权限"}
 	case 404:

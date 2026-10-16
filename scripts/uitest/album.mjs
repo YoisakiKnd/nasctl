@@ -1,7 +1,7 @@
-// Full browser-DOM -> nasctl proxy -> real albumctl service workflow. Both
-// services use generated fixtures; no scan or thumbnail job is started here.
+// Full browser-DOM -> nasctl -> in-process album API workflow over generated
+// fixtures; no scan or thumbnail job is started here.
 import { JSDOM, VirtualConsole } from 'jsdom';
-const base=process.argv[2]||'http://127.0.0.1:18096',token=process.argv[3]||'';
+const base=process.argv[2]||'http://127.0.0.1:18099',token=process.argv[3]||'';
 const headers=token?{Authorization:`Bearer ${token}`}:{},errors=[],vc=new VirtualConsole();vc.on('jsdomError',(error)=>errors.push(error.message));
 const request=(path,options={})=>fetch(new URL(path,base),{...options,headers:{...options.headers,...headers}});
 const dom=new JSDOM(await(await request('/')).text(),{url:base+'/#album',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:vc});
@@ -17,8 +17,7 @@ w.fetch=request;w.AbortController=AbortController;w.matchMedia=()=>({matches:fal
 w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
 try{
   const initialJobs=(await(await request('/api/v1/jobs?limit=200')).json()).jobs.map((job)=>job.id);
-  const state=await(await request('/api/v1/album/status')).json();check(state.configured&&state.connected,'real albumctl connection works with backend-only credential');
-  check(!JSON.stringify(state).includes('nasctl-disposable-album-token'),'album credential is absent from status');
+  const state=await(await request('/api/v1/album/status')).json();check(state.configured&&state.connected,'local album index is connected');
   w.eval(await(await request('/app.js')).text());await wait(()=>tiles().length===48&&!d.querySelector('.loading-state'),'48-item gallery page');
   check(!d.querySelector('.album-filters')&&!d.querySelector('.photo-library-heading')&&!d.querySelector('.photo-filter-options')&&!d.querySelector('.album-tile-info'),'photos lead the library; advanced filters and file metadata stay out of the grid');
   check(d.querySelectorAll('.photo-month').length===2,'photos are grouped by capture month');
@@ -70,5 +69,5 @@ try{
   w.location.hash='album';await wait(()=>d.querySelector('.desktop-shell.mobile-photo'),'reopen minimized photo app');
   w.innerWidth=1024;w.dispatchEvent(new w.Event('resize'));await delay(0);check(!d.querySelector('.desktop-shell.mobile-photo'),'desktop window layout returns after phone breakpoint');
   const finalJobs=(await(await request('/api/v1/jobs?limit=200')).json()).jobs.map((job)=>job.id);check(JSON.stringify(initialJobs)===JSON.stringify(finalJobs),'album browsing creates no background jobs');
-  check(errors.length===0,'no DOM errors: '+errors.join('; '));console.log('Integrated album flows passed through the real read-only albumctl service. Codec playback is a separate check.');
+  check(errors.length===0,'no DOM errors: '+errors.join('; '));console.log('Integrated album flows passed through the read-only local album API. Codec playback is a separate check.');
 }finally{dom.window.close();}

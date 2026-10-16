@@ -1,4 +1,4 @@
-# albumctl runbook
+# nasctl runbook
 
 Operations, troubleshooting, index recovery and rollback.
 
@@ -11,22 +11,22 @@ existing services or the existing backup.
 
 ```sh
 # Is anything of mine running, and what is waiting?
-albumctl status --config /etc/albumctl/config.toml
+nasctl album status --config /etc/albumctl/config.toml
 
 # Stop everything of mine, durably, including across a reboot.
-albumctl pause --reason "operator stop"
+nasctl album pause --reason "operator stop"
 
 # Look before touching: what is wrong, and what is my cache doing?
-albumctl doctor       --config /etc/albumctl/config.toml
-albumctl cache-report --config /etc/albumctl/config.toml
+nasctl album doctor       --config /etc/albumctl/config.toml
+nasctl album cache-report --config /etc/albumctl/config.toml
 
 # Start a batch again, deliberately.
-albumctl resume --config /etc/albumctl/config.toml
+nasctl album resume --config /etc/albumctl/config.toml
 ```
 
 Rules to keep in mind while reading the rest:
 
-* `albumctl pause` is the only "stop" that is durable. A resource trip is also
+* `nasctl album pause` is the only "stop" that is durable. A resource trip is also
   durable, and `resume` is the only thing that clears either.
 * No command in this project stops, signals or reconfigures anything outside it.
 * Nothing ever writes to a media directory. Every write is a temp file plus a
@@ -39,7 +39,7 @@ Rules to keep in mind while reading the rest:
 Read the service's own view first — it is cheap and does not touch the media:
 
 ```sh
-albumctl status --config /etc/albumctl/config.toml
+nasctl album status --config /etc/albumctl/config.toml
 ```
 
 Look at, in order:
@@ -58,16 +58,16 @@ Look at, in order:
 Then, from the shell:
 
 ```sh
-systemctl status albumctl-web
-journalctl -u albumctl-web -u albumctl-thumbs --since "-1h" --no-pager
+systemctl status nasctl-web
+journalctl -u nasctl-web -u nasctl-album-thumbs --since "-1h" --no-pager
 ```
 
 If the *machine* is slow but this service looks idle, the cause is elsewhere.
-`albumctl` is a reader; it does not hold the machine when it is not running a
-task. Confirm with:
+The console is a reader; it does not hold the machine when it is not running a
+bounded album task. Confirm with:
 
 ```sh
-albumctl status --config /etc/albumctl/config.toml --json
+nasctl album status --config /etc/albumctl/config.toml --json
 ```
 
 The JSON includes the cgroup's `memory.current` and `memory.events` when
@@ -83,9 +83,9 @@ on the web side can fix it, because the web side is not allowed to decode
 anything.
 
 ```sh
-albumctl doctor       --config /etc/albumctl/config.toml   # is heavy work allowed at all?
-albumctl cache-report --config /etc/albumctl/config.toml   # how much cache is there?
-albumctl thumbs --collection photos --limit 10 --max-runtime 10m
+nasctl album doctor       --config /etc/albumctl/config.toml   # is heavy work allowed at all?
+nasctl album cache-report --config /etc/albumctl/config.toml   # how much cache is there?
+nasctl album thumbs --collection photos --limit 10 --max-runtime 10m
 ```
 
 If `doctor` reports that cgroup isolation is unavailable, that is why nothing is
@@ -93,7 +93,7 @@ being generated: heavy tasks refuse to run when the limits they depend on cannot
 be applied. Fix the delegation (see §6) rather than turning the requirement off.
 
 A cache-report that shows the cache full is also a stop condition, not a bug: the
-next step is `albumctl cache-gc`, which only ever removes albumctl's own
+next step is `nasctl album cache-gc`, which only ever removes the album's own
 thumbnail files.
 
 Two different "full" states are worth telling apart, because only one of them is
@@ -123,7 +123,7 @@ or when a worker was killed for exceeding its ceiling. It blocks the next run on
 purpose. Nothing restarts automatically.
 
 ```sh
-albumctl status --config /etc/albumctl/config.toml     # see the recorded reason
+nasctl album status --config /etc/albumctl/config.toml     # see the recorded reason
 ```
 
 Ask three questions before resuming:
@@ -142,8 +142,8 @@ Ask three questions before resuming:
 Then, if the machine has recovered:
 
 ```sh
-albumctl resume --config /etc/albumctl/config.toml
-albumctl thumbs --collection photos --limit 5 --max-runtime 10m
+nasctl album resume --config /etc/albumctl/config.toml
+nasctl album thumbs --collection photos --limit 5 --max-runtime 10m
 ```
 
 `resume` clears the trip. It does not start work, and it does not enable a
@@ -172,8 +172,8 @@ deleted, and the correct recovery is:
 
 ```sh
 mount /mnt/data            # bring the real data back
-albumctl doctor --config /etc/albumctl/config.toml     # confirm the mount and the FSID
-albumctl scan --collection photos --limit 5000         # a complete walk clears the flags
+nasctl album doctor --config /etc/albumctl/config.toml     # confirm the mount and the FSID
+nasctl album scan --collection photos --limit 5000         # a complete walk clears the flags
 ```
 
 The flags clear themselves on the next complete walk that sees the files again.
@@ -196,7 +196,7 @@ renamed, deleted or rewritten by any recovery step here.
 ### It will not open
 
 ```sh
-albumctl doctor --config /etc/albumctl/config.toml
+nasctl album doctor --config /etc/albumctl/config.toml
 ```
 
 `doctor` runs `PRAGMA integrity_check` and reports a schema mismatch separately
@@ -209,18 +209,18 @@ from corruption.
   satisfied; it costs disk, not correctness.
 
 ```sh
-systemctl stop albumctl-web
+systemctl stop nasctl-web
 cd /var/lib/albumctl
 mv index.sqlite3 index.sqlite3.corrupt-$(date +%s)
 # The WAL and SHM sidecars belong to the old file; move them too.
 mv index.sqlite3-wal index.sqlite3-shm . 2>/dev/null || true
-albumctl scan --collection photos --limit 5000     # rebuilds the rows
-albumctl thumbnails --collection photos --limit 50 # optionally re-warm the cache
-systemctl start albumctl-web
+nasctl album scan --collection photos --limit 5000     # rebuilds the rows
+nasctl album thumbs --collection photos --limit 50 # optionally re-warm the cache
+systemctl start nasctl-web
 ```
 
 Thumbnails whose rows were lost become orphans in the cache directory;
-`albumctl cache-gc` removes them after the configured grace period. Nothing else
+`nasctl album cache-gc` removes them after the configured grace period. Nothing else
 is touched.
 
 ### It is there but wrong
@@ -251,7 +251,7 @@ and which has its own byte and file ceilings and its own report.
 [FAIL] guard.require_cgroup_isolation is true, so heavy tasks will refuse to run
 ```
 
-This is deliberate. Without delegation, albumctl cannot attribute memory to a
+This is deliberate. Without delegation, the album task cannot attribute memory to a
 decode child, cannot see its OOM count and cannot stop it as a group; it would be
 back to watching one process's RSS, which is what the design says is not enough.
 
@@ -264,9 +264,9 @@ Delegate=yes
 Verify that the service actually got its own subtree:
 
 ```sh
-systemctl status albumctl-thumbs
-cat /sys/fs/cgroup/system.slice/albumctl-thumbs.service/cgroup.controllers
-cat /sys/fs/cgroup/system.slice/albumctl-thumbs.service/memory.max
+systemctl status nasctl-album-thumbs
+cat /sys/fs/cgroup/system.slice/nasctl-album-thumbs.service/cgroup.controllers
+cat /sys/fs/cgroup/system.slice/nasctl-album-thumbs.service/memory.max
 ```
 
 The recovery is never `require_cgroup_isolation = false` on this machine. If you
@@ -275,8 +275,8 @@ set it for an experiment, set it back.
 ## 7. Pause, and what it does not cover
 
 ```sh
-albumctl pause --reason "family using the NAS"     # durable, survives reboot
-albumctl resume                                    # clears the pause, starts nothing
+nasctl album pause --reason "family using the NAS"     # durable, survives reboot
+nasctl album resume                                    # clears the pause, starts nothing
 ```
 
 While paused:
@@ -296,16 +296,16 @@ Rolling back is safe because the project owns only two directories and one binar
 
 ```sh
 # 1. Stop, and stay stopped.
-albumctl pause --reason "rolling back"
-systemctl disable --now albumctl-web.service
-systemctl disable --now albumctl-thumbs.timer     # if it was ever enabled
-systemctl stop albumctl-thumbs.service
+nasctl album pause --reason "rolling back"
+systemctl disable --now nasctl-web.service
+systemctl disable --now nasctl-album-thumbs.timer     # if it was ever enabled
+systemctl stop nasctl-album-thumbs.service
 
 # 2. Remove the pieces. The media tree is not mentioned here, on purpose.
-rm -f /usr/local/bin/albumctl
-rm -f /etc/systemd/system/albumctl-web.service
-rm -f /etc/systemd/system/albumctl-thumbs.service
-rm -f /etc/systemd/system/albumctl-thumbs.timer
+rm -f /usr/local/bin/nasctl
+rm -f /etc/systemd/system/nasctl-web.service
+rm -f /etc/systemd/system/nasctl-album-thumbs.service
+rm -f /etc/systemd/system/nasctl-album-thumbs.timer
 systemctl daemon-reload
 
 # 3. Keep the state, or remove it. Keeping it makes a reinstall cheap.
@@ -319,9 +319,9 @@ To roll back a *version* rather than the whole thing:
 
 ```sh
 # The previous binary and its checksum.
-sha256sum -c albumctl-linux-armv7.sha256
-install -m 0755 albumctl-linux-armv7 /usr/local/bin/albumctl
-albumctl version
+sha256sum -c nasctl-linux-armv7.sha256
+install -m 0755 nasctl-linux-armv7 /usr/local/bin/nasctl
+nasctl album version
 ```
 
 The index schema is versioned (`PRAGMA user_version`). A newer binary upgrades it
@@ -336,11 +336,11 @@ step requires stopping another service.
 ## 9. What to collect for a bug report
 
 ```sh
-albumctl version
-albumctl status   --config /etc/albumctl/config.toml --json
-albumctl doctor   --config /etc/albumctl/config.toml
-albumctl cache-report --config /etc/albumctl/config.toml --json
-journalctl -u albumctl-web -u albumctl-thumbs --since "-2h" --no-pager
+nasctl album version
+nasctl album status   --config /etc/albumctl/config.toml --json
+nasctl album doctor   --config /etc/albumctl/config.toml
+nasctl album cache-report --config /etc/albumctl/config.toml --json
+journalctl -u nasctl-web -u nasctl-album-thumbs --since "-2h" --no-pager
 cat /proc/meminfo | head -5
 cat /proc/pressure/memory 2>/dev/null
 ```
@@ -351,8 +351,8 @@ touches a decoder.
 
 # Part 2 — the console (`nasctl`)
 
-The console is a separate service from `albumctl`. It reads and reports; it does
-not scan, decode, transcode or write files. Its evidence and unverified items are
+The console serves the web UI. It does not scan or decode in its own process;
+explicit album work runs as a separate, bounded `nasctl album` process. Its evidence and unverified items are
 in `HUB-STAGE-B.md`.
 
 ## 9. The console says something is wrong

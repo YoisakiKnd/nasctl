@@ -1,13 +1,13 @@
-// Package e2e drives the real albumctl binary as a separate process against a
-// synthetic media library, and exercises the safety properties that phase C of
-// the plan calls for.
+// Package e2e drives the real nasctl binary's `nasctl album` commands as a
+// separate process against a synthetic media library, and exercises the safety
+// properties that phase C of the plan calls for.
 //
-// Everything here runs the shipped binary rather than calling library
+// Album processing runs the shipped binary rather than calling library
 // functions, because the properties under test are process-level: that the
 // worker is a separate process, that a killed worker leaves nothing published,
-// that pause survives a restart, that a request cannot make the server do heavy
-// work. A test that called the functions in-process would not be able to show
-// any of that.
+// that pause survives a restart. The read-only album API is mounted in process
+// over a fresh read-only index handle, exactly as nasctl serve mounts it, so a
+// request still cannot make it do heavy work.
 //
 // Nothing in this package touches production. It runs against a temporary
 // directory tree and a loopback listener only.
@@ -26,11 +26,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
-	"syscall"
 	"testing"
 	"time"
 
+	"github.com/YoisakiKnd/nasctl/internal/albumapi"
+	"github.com/YoisakiKnd/nasctl/internal/config"
+	"github.com/YoisakiKnd/nasctl/internal/store"
 	"github.com/YoisakiKnd/nasctl/internal/synth"
 )
 
@@ -47,14 +48,14 @@ func TestMain(m *testing.M) {
 	}
 	modRoot = root
 
-	dir, err := os.MkdirTemp("", "albumctl-e2e-bin")
+	dir, err := os.MkdirTemp("", "nasctl-e2e-bin")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "e2e: %v\n", err)
 		os.Exit(1)
 	}
-	binPath = filepath.Join(dir, "albumctl")
+	binPath = filepath.Join(dir, "nasctl")
 
-	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/albumctl")
+	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/nasctl")
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "GOPROXY=off", "CGO_ENABLED=0")
 	var stderr bytes.Buffer
@@ -215,7 +216,7 @@ func (r *rig) run(args ...string) (string, string, int) {
 
 func (r *rig) runEnv(env []string, args ...string) (string, string, int) {
 	r.t.Helper()
-	full := append([]string{"--config", r.Config}, args...)
+	full := append([]string{"album", "--config", r.Config}, args...)
 	cmd := exec.Command(binPath, full...)
 	cmd.Dir = r.Root
 	cmd.Env = append(append(os.Environ(), r.EnvExtra...), env...)
@@ -231,7 +232,7 @@ func (r *rig) runEnv(env []string, args ...string) (string, string, int) {
 			r.t.Fatalf("running %v: %v", full, err)
 		}
 	}
-	r.t.Logf("$ albumctl %s\n[exit %d]\n%s%s", strings.Join(args, " "), code, out.String(), errb.String())
+	r.t.Logf("$ nasctl album %s\n[exit %d]\n%s%s", strings.Join(args, " "), code, out.String(), errb.String())
 	return out.String(), errb.String(), code
 }
 
@@ -239,7 +240,7 @@ func (r *rig) mustRun(args ...string) string {
 	r.t.Helper()
 	out, errs, code := r.run(args...)
 	if code != 0 {
-		r.t.Fatalf("albumctl %s exited %d\nstdout:\n%s\nstderr:\n%s", strings.Join(args, " "), code, out, errs)
+		r.t.Fatalf("nasctl album %s exited %d\nstdout:\n%s\nstderr:\n%s", strings.Join(args, " "), code, out, errs)
 	}
 	return out
 }
@@ -257,79 +258,53 @@ func freePort(t *testing.T) string {
 
 // ---- web server ---------------------------------------------------------
 
-// server is a running albumctl web service.
+// server is the album API mounted over a read-only index handle.
 type server struct {
-	t    *testing.T
-	cmd  *exec.Cmd
-	Base string
-	out  *lockedBuffer
+	t     *testing.T
+	Base  string
+	close func()
 }
 
-type lockedBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *lockedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *lockedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
-
-// startServer launches `serve` and waits for the status endpoint to answer.
+// startServer mounts the album API the way nasctl serve does and waits for the
+// status endpoint to answer.
 func (r *rig) startServer() *server {
 	r.t.Helper()
-	cmd := exec.Command(binPath, "--config", r.Config, "serve")
-	cmd.Dir = r.Root
-	cmd.Env = append(os.Environ(), r.EnvExtra...)
-	buf := &lockedBuffer{}
-	cmd.Stdout = buf
-	cmd.Stderr = buf
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
-		r.t.Fatalf("starting serve: %v", err)
+	cfg, err := config.Load(r.Config)
+	if err != nil {
+		r.t.Fatalf("loading config: %v", err)
 	}
-	s := &server{t: r.t, cmd: cmd, Base: "http://" + r.Listen, out: buf}
-
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		req, _ := http.NewRequestWithContext(ctx, "GET", s.Base+"/api/v1/status", nil)
-		resp, err := http.DefaultClient.Do(req)
-		cancel()
-		if err == nil {
-			resp.Body.Close()
-			r.t.Cleanup(s.stop)
-			return s
-		}
-		time.Sleep(150 * time.Millisecond)
+	st, err := store.Open(cfg.Paths.IndexFile, store.Options{ReadOnly: true})
+	if err != nil {
+		r.t.Fatalf("opening the index read-only: %v", err)
 	}
-	s.stop()
-	r.t.Fatalf("the web service did not become ready; output:\n%s", buf.String())
-	return nil
+	srv, err := albumapi.New(cfg, st, nil)
+	if err != nil {
+		st.Close()
+		r.t.Fatalf("album API: %v", err)
+	}
+	ln, err := net.Listen("tcp", r.Listen)
+	if err != nil {
+		st.Close()
+		r.t.Fatalf("listen: %v", err)
+	}
+	hs := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 5 * time.Second}
+	go func() { _ = hs.Serve(ln) }()
+	s := &server{t: r.t, Base: "http://" + r.Listen}
+	s.close = func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = hs.Shutdown(ctx)
+		_ = st.Close()
+	}
+	r.t.Cleanup(s.stop)
+	return s
 }
 
 func (s *server) stop() {
-	if s.cmd == nil || s.cmd.Process == nil {
-		return
+	if s.close != nil {
+		s.close()
+		s.close = nil
 	}
-	// Ask for a graceful stop first, then insist.
-	_ = s.cmd.Process.Signal(syscall.SIGTERM)
-	done := make(chan struct{})
-	go func() { _ = s.cmd.Wait(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(12 * time.Second):
-		_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
-		<-done
-	}
-	s.cmd = nil
 }
 
 func (s *server) get(path string) (*http.Response, []byte) {

@@ -660,8 +660,8 @@ func (c *Config) Finalize() error {
 	}
 
 	// ---- collections ----
-	if len(c.Collections) == 0 && !c.Hub.Anime.Enabled && len(c.Hub.Storage) == 0 && c.Hub.Album.APIBase == "" && !c.Hub.Setup {
-		fail("at least one collection, storage root, album connection, or enabled native anime module is required")
+	if len(c.Collections) == 0 && !c.Hub.Anime.Enabled && len(c.Hub.Storage) == 0 && !c.Hub.Setup {
+		fail("at least one collection, storage root, or enabled native anime module is required")
 	}
 	seen := map[string]bool{}
 	for i := range c.Collections {

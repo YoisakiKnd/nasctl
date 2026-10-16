@@ -1,13 +1,12 @@
 #!/bin/sh
-# Reproducible ARMv7 build of albumctl and nasctl.
+# Reproducible ARMv7 build of nasctl.
 #
-# Two binaries, one build. They are separate programs with different jobs:
-# albumctl scans and decodes under a resource guard, nasctl reads and reports.
-# Keeping them separate is what lets the console's import graph contain no
-# decoder, so an HTTP request cannot start a full-library scan.
+# One binary. The console serves the web UI; explicit album work re-executes
+# the same binary as `nasctl album ...` in a separate, resource-guarded process.
+# Import-graph tests keep the decoders out of the web handlers' packages, so an
+# HTTP request cannot start a full-library scan.
 #
 # Produces:
-#   dist/albumctl-linux-armv7      static 32-bit ARM binary, GOARM=7
 #   dist/nasctl-linux-armv7        static 32-bit ARM binary, GOARM=7
 #   dist/SHA256SUMS                checksums
 #   dist/deps.txt                  what the binaries need at runtime
@@ -28,8 +27,7 @@ set -eu
 cd "$(dirname "$0")/.."
 
 OUT=dist
-BIN=$OUT/albumctl-linux-armv7
-BIN_HUB=$OUT/nasctl-linux-armv7
+BIN=$OUT/nasctl-linux-armv7
 GO=${GO:-go}
 command -v "$GO" >/dev/null 2>&1 || {
     # A common case when Go was unpacked rather than installed.
@@ -67,23 +65,17 @@ mkdir -p "$OUT"
 # -trimpath                      : no build directory in the binary, so the
 #                                  output does not depend on where it was built.
 GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 GOFLAGS=-trimpath \
-    "$GO" build -trimpath -buildvcs=false -ldflags "$LDFLAGS" -o "$BIN" ./cmd/albumctl
-
-# The console. Same target, same flags, same reproducibility: a second command
-# rather than a second script, so the two artefacts cannot drift apart in how
-# they were produced.
-GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 GOFLAGS=-trimpath \
-    "$GO" build -trimpath -buildvcs=false -ldflags "$LDFLAGS" -o "$BIN_HUB" ./cmd/nasctl
+    "$GO" build -trimpath -buildvcs=false -ldflags "$LDFLAGS" -o "$BIN" ./cmd/nasctl
 
 # ---- record what was built and what it needs -------------------------------
 {
-    echo "albumctl and nasctl ARMv7 build"
+    echo "nasctl ARMv7 build"
     echo "go:      $("$GO" version)"
     echo "commit:  $COMMIT"
     echo "version: $VERSION"
     echo "built:   $BUILD_TIME"
     echo "target:  GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0"
-    for b in "$BIN" "$BIN_HUB"; do
+    for b in "$BIN"; do
         echo
         echo "artefact:  $b"
         echo "size:      $(wc -c <"$b") bytes"
@@ -129,9 +121,9 @@ GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 GOFLAGS=-trimpath \
     echo "filesystems:       state requires reliable local SQLite WAL locking."
     echo "                   Media and backup roots need separate validation on"
     echo "                   their actual filesystem; NFS/SMB is not verified here."
-    echo "external programs: nasctl starts the matching albumctl binary on demand"
-    echo "                   for explicit album tasks; no separate album HTTP"
-    echo "                   service is needed. ffmpeg and ExifTool are not required."
+    echo "external programs: nasctl re-executes itself as \`nasctl album\` on demand"
+    echo "                   for explicit album tasks; no separate album binary or"
+    echo "                   HTTP service is needed. ffmpeg and ExifTool are not required."
     echo "                   Video posters are off and their adapter is not"
     echo "                   compiled in; a missing adapter skips a format rather"
     echo "                   than failing a library."
@@ -142,13 +134,13 @@ GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 GOFLAGS=-trimpath \
     echo "                   tasks when unavailable; browsing remains available."
     echo
     echo "--- what this artefact has NOT been verified against ---"
-    echo "This build script does not run QEMU or execute either target binary."
+    echo "This build script does not run QEMU or execute the target binary."
     echo "It has NOT verified the target onecloud. Memory numbers taken under"
     echo "emulation are not the target's numbers and must not be presented as"
     echo "measurements of it."
 } >"$OUT/deps.txt" 2>&1
 
-sha256sum "$BIN" "$BIN_HUB" > "$OUT/SHA256SUMS"
+sha256sum "$BIN" > "$OUT/SHA256SUMS"
 
 {
     echo
@@ -161,4 +153,4 @@ cat "$OUT/deps.txt"
 echo
 cat "$OUT/SHA256SUMS"
 echo
-echo "Wrote $BIN and $BIN_HUB"
+echo "Wrote $BIN"

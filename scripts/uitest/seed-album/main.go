@@ -44,7 +44,6 @@ func main() {
 	writable := flag.Bool("writable", false, "allow writes in this disposable photo root")
 	fixture := flag.Bool("fixture-only", false, "acknowledge disposable test data")
 	base := flag.String("root", "", "empty or previously owned fixture directory")
-	albumPort := flag.Int("album-port", 18095, "local album port")
 	hubPort := flag.Int("hub-port", 18096, "local console port")
 	flag.Parse()
 	if !*fixture || *base == "" {
@@ -64,14 +63,12 @@ func main() {
 	}
 	must(os.MkdirAll(filepath.Join(abs, "library", "Additional"), 0750))
 	must(os.WriteFile(marker, []byte("nasctl-album-fixture-v1\n"), 0600))
-	albumDoc := fmt.Sprintf("[server]\nbind=\"127.0.0.1:%d\"\ntoken=\"nasctl-disposable-album-token\"\n[paths]\nstate_dir=%q\ncache_dir=%q\n[[collections]]\ncode=\"photos\"\nname=\"Fixture Photos\"\nroot=%q\nenabled=true\nallow_shared_volume=true\n", *albumPort, filepath.Join(abs, "album-state"), filepath.Join(abs, "cache"), filepath.Join(abs, "library"))
+	albumDoc := fmt.Sprintf("[paths]\nstate_dir=%q\ncache_dir=%q\n[[collections]]\ncode=\"photos\"\nname=\"Fixture Photos\"\nroot=%q\nenabled=true\nallow_shared_volume=true\n", filepath.Join(abs, "album-state"), filepath.Join(abs, "cache"), filepath.Join(abs, "library"))
 	must(os.WriteFile(filepath.Join(abs, "album.toml"), []byte(albumDoc), 0600))
 	cfg, err := config.Parse(albumDoc)
 	must(err)
-	hubDoc := fmt.Sprintf("[server]\nbind=\"127.0.0.1:%d\"\n[paths]\nstate_dir=%q\ncache_dir=%q\n[hub.album]\napi_base=\"http://127.0.0.1:%d\"\ntoken=\"nasctl-disposable-album-token\"\n", *hubPort, filepath.Join(abs, "hub-state"), filepath.Join(abs, "hub-cache"), *albumPort)
-	must(os.WriteFile(filepath.Join(abs, "hub.toml"), []byte(hubDoc), 0600))
-	// This uses the same actual index/cache, with no album HTTP service. The
-	// processing component is discovered beside the nasctl binary when needed.
+	// The console reads the same index/cache in process, and re-executes
+	// itself as `nasctl album` for explicit processing.
 	nativeDoc := fmt.Sprintf("[server]\nbind=\"127.0.0.1:%d\"\n[paths]\nstate_dir=%q\ncache_dir=%q\n[[collections]]\ncode=\"photos\"\nname=\"Fixture Photos\"\nroot=%q\nenabled=true\nallow_shared_volume=true\n[[hub.storage]]\nid=\"photos\"\nlabel=\"Fixture Photos\"\npath=%q\nwritable=%t\n[hub.album]\nmode=\"local\"\n", *hubPort, filepath.Join(abs, "album-state"), filepath.Join(abs, "cache"), filepath.Join(abs, "library"), filepath.Join(abs, "library"), *writable)
 	must(os.WriteFile(filepath.Join(abs, "native.toml"), []byte(nativeDoc), 0600))
 	st, err := store.Open(cfg.Paths.IndexFile, store.Options{})

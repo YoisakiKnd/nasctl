@@ -1,17 +1,21 @@
 # nasctl —— 轻量 NAS 控制台
 
-两个程序，一条原则：**机器不能宕，原文件不能坏，这比功能多少更重要。**
+一个程序，一条原则：**机器不能宕，原文件不能坏，这比功能多少更重要。**
 
-- **`albumctl`** —— 照片和视频索引，加一个只读网页查看器。它会扫描目录、生成
+- **`nasctl`** —— NAS 控制台：文件浏览、预览、相册、自动追番、媒体库、
+  本地文件备份和任务记录。原生追番提供 RSS 筛选、qBittorrent 下载、归档和可选 TMDB 元数据。
+- **`nasctl album`** —— 同一个程序里的相册处理命令。它会扫描目录、生成
   缩略图，但**永远**是有上限的任务：有明确的数量上限、运行时长上限，前面还有
   一道资源闸门可以随时叫停。
-- **`nasctl`** —— NAS 控制台：文件浏览、预览、相册索引、自动追番、媒体库、
-  本地文件备份和任务记录。原生追番提供 RSS 筛选、qBittorrent 下载、归档和可选 TMDB 元数据。
 
-日常只需启动 `nasctl`：它直接读取本地相册索引，无需另启相册 HTTP 服务。
-扫描与缩略图通过按需启动的 `albumctl` 处理组件执行；将它放在 nasctl 同目录即可。
+日常只需启动 `nasctl serve`：它直接读取本地相册索引。扫描与缩略图由控制台按需
+以 `nasctl album ...` 重新启动自身，在独立进程和 cgroup 中执行，不需要另装程序。
 Web 查询层的导入图仍不包含扫描器、解码器或子进程实现，只有经权限与资源检查的
-显式任务入口能调用有数量、时间上限的后台处理组件。
+显式任务入口能启动有数量、时间上限的后台处理进程。
+
+> 从旧版升级：原来的 `albumctl` 已并入 `nasctl album`，`albumctl serve` 独立网页和
+> `hub.album.api_base` 远程模式已移除。配置、索引和缓存路径（`/etc/albumctl`、
+> `/var/lib/albumctl`）保持不变，可直接沿用；systemd 定时器改为 `nasctl-album-thumbs`。
 
 追番保留下载器的原始文件，在独立媒体库中创建硬链接或副本。文件目录默认只读；显式
 启用后支持上传、建目录、复制／跨存储移动、改名、回收恢复和确认后永久清理，
@@ -71,14 +75,14 @@ macOS 可用于控制台开发；相册任务的 Linux 资源保护和相关完�
 
 ## 运行
 
-`albumctl` 和 `nasctl` 读同一个配置文件。复制样例再改路径：
+控制台和相册命令读同一个配置文件。复制样例再改路径：
 
 ```sh
-cp configs/albumctl.example.toml /etc/albumctl/config.toml
+cp configs/nasctl.example.toml /etc/albumctl/config.toml
 $EDITOR /etc/albumctl/config.toml
 
-albumctl doctor --config /etc/albumctl/config.toml    # 只读体检
-nasctl   doctor --config /etc/albumctl/config.toml
+nasctl album doctor --config /etc/albumctl/config.toml    # 相册只读体检
+nasctl doctor --config /etc/albumctl/config.toml
 ```
 
 样例里**每一个策略值都是内置默认值**，所以删掉某一行就等于恢复默认。只有
@@ -94,15 +98,15 @@ nasctl   doctor --config /etc/albumctl/config.toml
 nasctl serve --config /etc/albumctl/config.toml
 
 # 相册任务，有上限，一次一个 collection。
-albumctl scan   --collection photos --limit 500 --dry-run   # 先预览
-albumctl scan   --collection photos --limit 500
-albumctl thumbs --collection photos --limit 200 --max-runtime 20m
+nasctl album scan   --collection photos --limit 500 --dry-run   # 先预览
+nasctl album scan   --collection photos --limit 500
+nasctl album thumbs --collection photos --limit 200 --max-runtime 20m
 ```
 
 **默认不做任何定时调度。** 夜间定时器是随包提供的，但处于禁用状态，启用它是
 一个需要单独决定、单独授权的步骤。
 
-`albumctl thumbs` 的退出码是给调度器读的：**0** 完成了这次有上限的工作（包括
+`nasctl album thumbs` 的退出码是给调度器读的：**0** 完成了这次有上限的工作（包括
 "队列本来就是空的"）；**3** 因策略原因提前停下，需要人来判断；**4** 因资源阈值
 停下，**不允许循环重试**。有上限的任务返回非零码，含义永远是"没有再往下做"，
 绝不是"机器被逼得更狠了"。

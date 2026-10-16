@@ -1,4 +1,4 @@
-// Actual nasctl -> on-demand albumctl pause/resume, plus local directory UI.
+// Actual nasctl -> on-demand `nasctl album` pause/resume, plus local directory UI.
 // Uses generated disposable fixture data; does not claim decoder/cgroup tests.
 import { JSDOM, VirtualConsole } from 'jsdom';
 const base=process.argv[2]||'http://127.0.0.1:18099';
@@ -29,9 +29,9 @@ try{
  button('确认保存目录').click();await delay(0);await wait(()=>button('确认添加目录')&&button('确认添加目录')&&!button('确认添加目录').disabled,'directory edit saved');
  settings=await(await request('/api/v1/album/settings')).json();check(settings.directories.some((item)=>item.code==='extra'&&!item.enabled),'enabled state saved');
  button('暂停后续处理').click();await wait(()=>!d.querySelector('dialog'),'pause task accepted');
- await wait(()=>d.querySelector('.album-view .photo-status')?.textContent.includes('相册处理已暂停'),'actual albumctl pause is visible through local reader');
+ await wait(()=>d.querySelector('.album-view .photo-status')?.textContent.includes('相册处理已暂停'),'actual nasctl album pause is visible through local reader');
  await manage();button('恢复处理许可').click();await wait(()=>!d.querySelector('dialog'),'resume task accepted');
- await wait(()=>d.querySelector('.task-monitor .badge')?.textContent==='已完成'&&![...d.querySelectorAll('.album-view .photo-status')].some((node)=>node.textContent.includes('相册处理已暂停')),'actual albumctl resume completes');
+ await wait(()=>d.querySelector('.task-monitor .badge')?.textContent==='已完成'&&![...d.querySelectorAll('.album-view .photo-status')].some((node)=>node.textContent.includes('相册处理已暂停')),'actual nasctl album resume completes');
  await manage();const savedRow=[...d.querySelectorAll('.album-directory-row')].find((node)=>node.textContent.includes('额外照片（停用）'));button('移除',savedRow).click();await delay(0);button('确认移除目录配置').click();
  await wait(()=>d.querySelectorAll('.album-directory-row').length===1&&button('确认添加目录')&&!button('确认添加目录').disabled,'managed directory removed without touching originals');
  button('关闭',d.querySelector('dialog')).click();await wait(()=>!d.querySelector('dialog'),'manager closes');

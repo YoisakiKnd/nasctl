@@ -37,10 +37,15 @@ type Control struct {
 }
 
 func NewControl(cfg *config.Config, fm *files.Manager, log *logx.Logger) (*Control, error) {
+	// Bounded album work re-executes this binary as `nasctl album ...`.
+	// worker_binary remains an explicit override for tests and packaging.
 	binary := cfg.Hub.Album.WorkerBinary
 	if binary == "" {
 		if exe, err := os.Executable(); err == nil {
-			binary = filepath.Join(filepath.Dir(exe), "albumctl")
+			binary = exe
+			if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+				binary = resolved
+			}
 		}
 	}
 	c := &Control{base: *cfg, files: fm, binary: binary, catalog: filepath.Join(cfg.Paths.StateDir, "album-directories.json"), directories: []album.Directory{}, launcher: newAlbumLauncher(cfg)}
@@ -265,7 +270,7 @@ func (c *Control) Run(ctx context.Context, w album.Work, progress func(album.Wor
 	c.mu.Unlock()
 	defer func() { c.mu.Lock(); c.busy = false; c.mu.Unlock() }()
 	if info, err := os.Stat(c.binary); err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
-		return album.WorkResult{}, errors.New("album worker is unavailable; install albumctl beside nasctl or configure hub.album.worker_binary")
+		return album.WorkResult{}, errors.New("album worker is unavailable; check hub.album.worker_binary or the nasctl executable")
 	}
 	// Workers receive only album settings, never NAS user/agent/downloader
 	// credentials. The private snapshot lives outside all browsable media roots.
@@ -290,7 +295,7 @@ func (c *Control) Run(ctx context.Context, w album.Work, progress func(album.Wor
 	if closeErr != nil {
 		return album.WorkResult{}, closeErr
 	}
-	args := []string{strings.TrimPrefix(w.Operation, "album."), "--config", name}
+	args := []string{"album", strings.TrimPrefix(w.Operation, "album."), "--config", name}
 	if w.Operation == "album.scan" || w.Operation == "album.thumbs" {
 		args = append(args, "--collection", w.Collection, "--limit", strconv.Itoa(w.Limit))
 	}

@@ -810,7 +810,7 @@ func TestAMisspelledKeyIsRefusedByItsName(t *testing.T) {
 // operator copies, so a key it lists must be a key that exists.
 func TestTheShippedExampleHasNoUnknownKeys(t *testing.T) {
 	for _, path := range []string{
-		filepath.Join("..", "..", "configs", "albumctl.example.toml"),
+		filepath.Join("..", "..", "configs", "nasctl.example.toml"),
 	} {
 		b, err := os.ReadFile(path)
 		if err != nil {

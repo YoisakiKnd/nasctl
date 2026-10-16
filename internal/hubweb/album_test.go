@@ -5,20 +5,18 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/YoisakiKnd/nasctl/internal/album"
-	"github.com/YoisakiKnd/nasctl/internal/config"
 	"github.com/YoisakiKnd/nasctl/internal/jobs"
 )
 
 func TestAlbumProxyPreservesRangesAndNeverForwardsOperatorSecrets(t *testing.T) {
 	r := newRig(t, func(c *Config, _ *jobs.Config) { c.Token = "operator-secret-value" })
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Authorization") != "Bearer independent-album-secret" || request.Header.Get("Cookie") != "" {
+	client, _ := album.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "" || request.Header.Get("Cookie") != "" {
 			t.Error("operator secret crossed service boundary", request.Header)
 		}
 		w.Header().Set("Set-Cookie", "untrusted=upstream")
@@ -27,8 +25,6 @@ func TestAlbumProxyPreservesRangesAndNeverForwardsOperatorSecrets(t *testing.T) 
 		w.Header().Set("ETag", `"test"`)
 		http.ServeContent(w, request, "video.mp4", time.Unix(123, 0), bytes.NewReader([]byte("abcdef")))
 	}))
-	defer upstream.Close()
-	client, _ := album.New(config.Album{APIBase: upstream.URL, Token: "independent-album-secret"})
 	r.srv.Album = client
 	defer client.Close()
 	for _, test := range []struct {
@@ -62,14 +58,12 @@ func TestAlbumProxyPreservesRangesAndNeverForwardsOperatorSecrets(t *testing.T) 
 	}
 }
 
-func TestAlbumStatusDoesNotLogOutConsoleOnUpstreamAuthFailure(t *testing.T) {
+func TestAlbumStatusDoesNotLogOutConsoleOnAlbumAuthFailure(t *testing.T) {
 	r := newRig(t, nil)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	client, _ := album.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(401)
 		io.WriteString(w, "secret-upstream-token /private/path")
 	}))
-	defer upstream.Close()
-	client, _ := album.New(config.Album{APIBase: upstream.URL})
 	defer client.Close()
 	r.srv.Album = client
 	response, b := r.get(t, "/api/v1/album/status")
@@ -97,7 +91,7 @@ func TestAlbumThumbnailProxyRefusesUnexpectedContentAndSize(t *testing.T) {
 	for _, scenario := range []string{"html", "large", "svg"} {
 		t.Run(scenario, func(t *testing.T) {
 			r := newRig(t, nil)
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			client, _ := album.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch scenario {
 				case "html":
 					w.Header().Set("Content-Type", "text/html")
@@ -110,8 +104,6 @@ func TestAlbumThumbnailProxyRefusesUnexpectedContentAndSize(t *testing.T) {
 					io.WriteString(w, `<svg xmlns="http://www.w3.org/2000/svg"></svg>`)
 				}
 			}))
-			defer upstream.Close()
-			client, _ := album.New(config.Album{APIBase: upstream.URL})
 			defer client.Close()
 			r.srv.Album = client
 			response, b := r.get(t, "/api/v1/album/media/1/thumb")

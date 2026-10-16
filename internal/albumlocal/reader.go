@@ -13,12 +13,12 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/YoisakiKnd/nasctl/internal/albumapi"
 	"github.com/YoisakiKnd/nasctl/internal/buildinfo"
 	"github.com/YoisakiKnd/nasctl/internal/config"
 	"github.com/YoisakiKnd/nasctl/internal/files"
 	"github.com/YoisakiKnd/nasctl/internal/fsutil"
 	"github.com/YoisakiKnd/nasctl/internal/logx"
-	"github.com/YoisakiKnd/nasctl/internal/server"
 	"github.com/YoisakiKnd/nasctl/internal/store"
 )
 
@@ -151,8 +151,8 @@ func (r *Reader) task(ctx context.Context, pid int) (store.Task, bool) {
 	return last, err == nil && last.PID == int64(pid)
 }
 
-func (r *Reader) newServer(cfg *config.Config, st *store.Store) (*server.Server, error) {
-	srv, err := server.New(cfg, st, r.log)
+func (r *Reader) newServer(cfg *config.Config, st *store.Store) (*albumapi.Server, error) {
+	srv, err := albumapi.New(cfg, st, r.log)
 	if err != nil || r.files == nil {
 		return srv, err
 	}

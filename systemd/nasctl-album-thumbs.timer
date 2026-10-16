@@ -1,5 +1,5 @@
 [Unit]
-Description=albumctl nightly thumbnail window (SHIPS DISABLED)
+Description=nasctl album nightly thumbnail window (SHIPS DISABLED)
 Documentation=file:/usr/local/share/doc/albumctl/RUNBOOK.md
 
 # ---------------------------------------------------------------------------
@@ -19,11 +19,11 @@ Documentation=file:/usr/local/share/doc/albumctl/RUNBOOK.md
 #   - It does NOT replace the resource thresholds. Even inside the window, every
 #     start still requires MemAvailable to be sustained above the start
 #     threshold, and the run still stops on any stop condition.
-#   - It does NOT touch the existing backup. It is albumctl that yields. Set
+#   - It does NOT touch the existing backup. It is album processing that yields. Set
 #     backup.check_command or backup.systemd_units so it knows when to yield,
 #     and prefer that interface over guessing from process names.
 #   - It does NOT resume a pressure trip. A trip stays until a human runs
-#     `albumctl resume`, which is exactly what should happen after a resource
+#     `nasctl album resume`, which is exactly what should happen after a resource
 #     stop.
 #
 # A reasonable first use of this timer, if it is ever used, is one small batch a
@@ -44,6 +44,6 @@ Persistent=false
 AccuracySec=1min
 
 [Install]
-# Left disabled: enable with `systemctl enable --now albumctl-thumbs.timer` once
+# Left disabled: enable with `systemctl enable --now nasctl-album-thumbs.timer` once
 # a manual bounded run has been accepted.
 WantedBy=timers.target

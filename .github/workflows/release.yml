@@ -103,12 +103,13 @@ jobs:
         run: |
           mkdir -p /tmp/nasctl-release-check
           tar -xzf dist/nasctl-linux-amd64.tar.gz -C /tmp/nasctl-release-check
-          for program in nasctl albumctl; do
-            output="$(/tmp/nasctl-release-check/nasctl-linux-amd64/$program version)"
+          bin=/tmp/nasctl-release-check/nasctl-linux-amd64/nasctl
+          for subcommand in "" album; do
+            output="$($bin $subcommand version)"
             echo "$output"
-            [[ "$output" == "$program $RELEASE_VERSION ("* ]]
+            [[ "$output" == "nasctl $RELEASE_VERSION ("* ]]
             [[ "$output" != *"-dev"* ]]
-            if [[ "$program" == albumctl ]]; then
+            if [[ "$subcommand" == album ]]; then
               [[ "$output" == *" (commit $SOURCE_COMMIT,"* ]]
             fi
           done

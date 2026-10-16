@@ -1,11 +1,14 @@
-# albumctl HTTP API v1 (read-only)
+# Album HTTP API v1 (read-only)
 
-The web service is **read-only**. It never scans, never decodes an original image, never
+This is the internal album API (`internal/albumapi`). nasctl mounts it in
+process and exposes it to the browser under `/api/v1/album/...` behind its own
+authentication; it no longer has a listener of its own. The paths below are the
+handler's own paths.
+
+The API is **read-only**. It never scans, never decodes an original image, never
 runs FFmpeg/ExifTool, never loads the whole library into memory and never queues cache
 work. Missing thumbnails return a placeholder immediately.
 
-Default bind: the Tailscale address of the host (or `127.0.0.1`). No public port, no
-Funnel, no sharing.
 
 ## Conventions
 
@@ -241,12 +244,12 @@ Read-only cache report; never deletes.
 {"files":1200,"bytes":98765432,"max_bytes":2147483648,"max_files":200000,
  "used_pct":4.6,"shard_depth":3,"indexed_thumbnails":1200,
  "source":"cache directory",
- "notes":["cache pruning is manual only: `albumctl cache-gc`",
+ "notes":["cache pruning is manual only: `nasctl album cache-gc`",
           "the web service never adds to the cache and never removes from it"]}
 ```
 
 The file and byte counts come from the cache **directory**, so this report and
-`albumctl cache-report` cannot disagree about the space actually in use: `bytes` is
+`nasctl album cache-report` cannot disagree about the space actually in use: `bytes` is
 what the files occupy on disk, not what the index believes. A note is added
 when the index records thumbnails for a different number of files than the directory
 holds, which is what a temporary file left by an interrupted write or a hand-deleted

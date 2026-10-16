@@ -30,7 +30,7 @@ nasctl_name="nasctl-linux-$nasctl_arch"
 nasctl_package="$nasctl_stage/$nasctl_name"
 mkdir -p "$nasctl_package"/{configs,systemd,docs}
 nasctl_flags="-s -w -X github.com/YoisakiKnd/nasctl/internal/buildinfo.Version=$nasctl_version -X github.com/YoisakiKnd/nasctl/internal/buildinfo.Commit=$nasctl_commit -X github.com/YoisakiKnd/nasctl/internal/buildinfo.BuildTime=$nasctl_time -X github.com/YoisakiKnd/nasctl/internal/buildinfo.Target=$nasctl_target"
-for nasctl_program in nasctl albumctl; do
+for nasctl_program in nasctl; do
   CGO_ENABLED=0 GOWORK=off GOOS=linux GOARCH="$nasctl_goarch" GOARM=7 \
     "$nasctl_go" build -trimpath -buildvcs=false -ldflags "$nasctl_flags" \
     -o "$nasctl_package/$nasctl_program" "./cmd/$nasctl_program"
@@ -45,7 +45,7 @@ for nasctl_program in nasctl albumctl; do
     echo "unexpected dynamic dependency: $nasctl_program" >&2; exit 1
   fi
 done
-cp configs/albumctl.example.toml "$nasctl_package/configs/"
+cp configs/nasctl.example.toml "$nasctl_package/configs/"
 cp systemd/nasctl-web.service "$nasctl_package/systemd/"
 cp LICENSE "$nasctl_package/"
 cp -R third_party/licenses "$nasctl_package/licenses"
@@ -60,7 +60,7 @@ done
   echo "target: $nasctl_target, CGO_ENABLED=0, static"
   echo
   echo 'Verify inside this directory: sha256sum -c SHA256SUMS'
-  echo 'Install nasctl and albumctl together; start only nasctl for daily use.'
+  echo 'Install the single nasctl binary; album processing runs as `nasctl album` on demand.'
   echo 'Follow docs/DEPLOYMENT.md for first setup, permissions and upgrades.'
   if [[ -n ${RELEASE_VERSION:-} ]]; then
     echo "Release-version build: $nasctl_version. Publication is controlled by the release workflow."

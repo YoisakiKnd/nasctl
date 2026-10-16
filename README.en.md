@@ -1,20 +1,25 @@
 # nasctl — a lightweight NAS console
 
-Two programs for resource-conscious Linux NAS devices, built around one rule: **the machine staying
+One program for resource-conscious Linux NAS devices, built around one rule: **the machine staying
 up, and the original files staying intact, matter more than the features.**
 
-* **`albumctl`** — a photo and video index with a read-only web viewer. It scans
-  directories and generates thumbnails, always as a bounded task with an explicit
-  limit, a wall-clock budget and a resource guard that can stop it.
-* **`nasctl`** — a NAS console: file browsing, preview, album index, native anime
+* **`nasctl`** — a NAS console: file browsing, preview, album, native anime
   subscriptions, media library, local backups and task history. Anime uses RSS,
   qBittorrent and optional TMDB metadata.
+* **`nasctl album`** — the album processing commands in the same binary. They
+  scan directories and generate thumbnails, always as a bounded task with an
+  explicit limit, a wall-clock budget and a resource guard that can stop it.
 
-Start only `nasctl` for daily use: it reads the local album index directly, with
-no separate album HTTP service. Install `albumctl` beside it as the on-demand
-bounded processing component. Import-graph tests keep decoders, scanners and
-subprocess implementations out of the web query layer; explicit operator tasks
-pass admission and resource checks before starting the processing component.
+Start only `nasctl serve` for daily use: it reads the local album index directly.
+Scans and thumbnails re-execute the same binary as `nasctl album ...` in a
+separate process and cgroup; nothing else needs installing. Import-graph tests
+keep decoders, scanners and subprocess implementations out of the web query
+layer; explicit operator tasks pass admission and resource checks first.
+
+> Upgrading: the former `albumctl` binary is now `nasctl album`; the standalone
+> `albumctl serve` viewer and the `hub.album.api_base` remote mode were removed.
+> Config, index and cache paths (`/etc/albumctl`, `/var/lib/albumctl`) are
+> unchanged; the systemd timer is now `nasctl-album-thumbs`.
 
 Anime archiving preserves the downloaded originals and creates links or copies
 inside a separate library. File roots default to read-only; explicit writable
@@ -83,14 +88,14 @@ macOS supports console development; album resource protection and the full suite
 
 ## Running it
 
-`albumctl` and `nasctl` read the same configuration file. Copy the example and
+The console and the album commands read the same configuration file. Copy the example and
 edit the paths:
 
 ```sh
-cp configs/albumctl.example.toml /etc/albumctl/config.toml
+cp configs/nasctl.example.toml /etc/albumctl/config.toml
 $EDITOR /etc/albumctl/config.toml
 
-albumctl doctor --config /etc/albumctl/config.toml    # read-only health check
+nasctl album doctor --config /etc/albumctl/config.toml    # read-only health check
 nasctl doctor --config /etc/albumctl/config.toml
 ```
 
@@ -108,9 +113,9 @@ Then, deliberately and by hand:
 nasctl serve --config /etc/albumctl/config.toml
 
 # Album work, bounded, one collection at a time.
-albumctl scan   --collection photos --limit 500 --dry-run   # preview first
-albumctl scan   --collection photos --limit 500
-albumctl thumbs --collection photos --limit 200 --max-runtime 20m
+nasctl album scan   --collection photos --limit 500 --dry-run   # preview first
+nasctl album scan   --collection photos --limit 500
+nasctl album thumbs --collection photos --limit 200 --max-runtime 20m
 ```
 
 Nothing is scheduled by default. The nightly timer ships disabled and must be

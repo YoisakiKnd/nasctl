@@ -1,5 +1,7 @@
 # albumctl — measured resource report
 
+> **2026-10 更新：** `albumctl` 已并入单一的 `nasctl` 二进制（`nasctl album ...`），独立的 `albumctl serve` 网页和远程相册模式已移除。下文中的 albumctl 指现在的 `nasctl album` 处理进程；隔离与资源边界不变。
+
 Everything below is either a raw observation with the command that produced it, or
 it is labelled as policy, as a guess, or as unverified. Nothing here is
 extrapolated from a different machine, and no number here is an emulator's number
@@ -32,7 +34,7 @@ Three consequences that matter more than the numbers:
    creating a child cgroup under `/sys/fs/cgroup/system.slice/dsh-web.service`
    returns `Permission denied`. So the isolation path was never exercised against
    a live, restricted worker here. What *was* verified is the refusal: with
-   `guard.require_cgroup_isolation` at its default `true`, `albumctl thumbs`
+   `guard.require_cgroup_isolation` at its default `true`, `nasctl album thumbs`
    declines to run at all on this host. Enforcement itself is unverified.
 2. **An RSS number is not a cgroup number.** A process can sit inside its RSS
    ceiling and still be killed by `MemoryMax` because a child, a mapped file or
@@ -90,7 +92,7 @@ will have a larger index; see section 7.
 
 ---
 
-## 2. Scanner (`albumctl scan`)
+## 2. Scanner (`nasctl album scan`)
 
 Every row started from an empty index (`rm -rf state cache`), so the column "rows
 indexed" is the size of the index the scanner built, not the number of rows it
@@ -101,7 +103,7 @@ touched. Peak RSS is the whole process's `Maximum resident set size` from
 $ for lim in 500 1000 2000 6000; do
     rm -rf state cache
     /usr/bin/time -v albumctl --config config.toml scan --collection photos --limit $lim
-    # then: rows from `albumctl status`, index bytes from state/index.sqlite3
+    # then: rows from `nasctl album status`, index bytes from state/index.sqlite3
   done
 ```
 
@@ -154,7 +156,7 @@ the basis of "let us see whether it fits".
 
 ---
 
-## 3. Thumbnails (`albumctl thumbs`, concurrency 1)
+## 3. Thumbnails (`nasctl album thumbs`, concurrency 1)
 
 Rig B, index pre-built with `scan --limit 6000`, then from a clean cache. Two
 different measurements are in play and they are not interchangeable: `/usr/bin/time

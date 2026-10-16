@@ -23,7 +23,7 @@
 .idea/
 .vscode/
 
-# Local configuration. The shipped example is configs/albumctl.example.toml;
+# Local configuration. The shipped example is configs/nasctl.example.toml;
 # a real configuration names real paths and may carry a token, so it must never
 # be committed.
 config.toml

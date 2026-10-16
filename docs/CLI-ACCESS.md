@@ -1,4 +1,4 @@
-# albumctl — CLI, web interface and permissions
+# nasctl album — CLI, album API and permissions
 
 This is the operator-facing description of what exists, what it is allowed to
 touch, and what it deliberately cannot do. Routes and payloads are specified in
@@ -14,24 +14,23 @@ renames, moves or rewrites an original, and none that starts an unbounded job.
 
 | Command | What it does | Writes | Exit codes |
 | --- | --- | --- | --- |
-| `albumctl status [--json]` | web service state, index totals, pending counts, current lock, pause and trip state, machine memory | nothing | 0; 1 on a broken config or unreadable index |
-| `albumctl scan --collection NAME --limit N [--dry-run] [--json]` | bounded directory + metadata pass | index only (`--dry-run`: nothing) | 0; 1 on config/usage error |
-| `albumctl thumbs --collection NAME --limit N --max-runtime D` | up to N thumbnail files within D | index + cache | 0 finished; 3 stopped by policy (pause, trip, backup busy, lock, operator, no isolation); 4 stopped by a resource reason |
-| `albumctl pause [--reason TEXT]` | stop heavy work durably | pause flag | 0 |
-| `albumctl resume [--force]` | clear the human pause (and, with `--force`, a pressure trip) | pause flag | 0 |
-| `albumctl doctor [--json] [--probe-writes]` | read-only health check: config, mounts, permissions, cache space, resource limits | nothing (unless `--probe-writes`) | 0 clean; 1 with problems |
-| `albumctl cache-report [--json]` | cache bytes, file count, ceiling and percentage | nothing | 0 |
-| `albumctl cache-gc [--max-age D] [--limit N] [--dry-run]` | remove *this application's own* cache files older than the age | cache only | 0 |
-| `albumctl collections [--json]` | the configured collections and their verification state | nothing | 0 |
-| `albumctl serve` | the read-only web service | state (its own record file) | 0; 1 if the address is taken or another live service is recorded |
-| `albumctl version` | version, target and runtime | nothing | 0 |
-| `albumctl exec-worker …` | internal: the isolated decode child. Not an operator interface | cache | internal |
+| `nasctl album status [--json]` | web service state, index totals, pending counts, current lock, pause and trip state, machine memory | nothing | 0; 1 on a broken config or unreadable index |
+| `nasctl album scan --collection NAME --limit N [--dry-run] [--json]` | bounded directory + metadata pass | index only (`--dry-run`: nothing) | 0; 1 on config/usage error |
+| `nasctl album thumbs --collection NAME --limit N --max-runtime D` | up to N thumbnail files within D | index + cache | 0 finished; 3 stopped by policy (pause, trip, backup busy, lock, operator, no isolation); 4 stopped by a resource reason |
+| `nasctl album pause [--reason TEXT]` | stop heavy work durably | pause flag | 0 |
+| `nasctl album resume [--force]` | clear the human pause (and, with `--force`, a pressure trip) | pause flag | 0 |
+| `nasctl album doctor [--json] [--probe-writes]` | read-only health check: config, mounts, permissions, cache space, resource limits | nothing (unless `--probe-writes`) | 0 clean; 1 with problems |
+| `nasctl album cache-report [--json]` | cache bytes, file count, ceiling and percentage | nothing | 0 |
+| `nasctl album cache-gc [--max-age D] [--limit N] [--dry-run]` | remove *this application's own* cache files older than the age | cache only | 0 |
+| `nasctl album collections [--json]` | the configured collections and their verification state | nothing | 0 |
+| `nasctl album version` | version, target and runtime | nothing | 0 |
+| `nasctl exec-worker …` | internal: the isolated decode child. Not an operator interface | cache | internal |
 
 The three that matter for safety are the ones with a cap: `scan` and `thumbs`
 always take a `--limit`, `thumbs` also takes `--max-runtime`, and neither has a
-"do the whole library" mode. `serve` never starts work of its own — it has no code
-path to a decoder, a scanner or a child process, and that is enforced by a test
-that walks the package graph.
+"do the whole library" mode. The album API that `nasctl serve` mounts never starts
+work of its own — it has no code path to a decoder, a scanner or a child process,
+and that is enforced by a test that walks the package graph.
 
 `thumbs`'s exit code is meant to be read by a scheduler: **0** for a run that did
 its job (including "the queue was empty"), **3** for a policy stop that a human
@@ -48,7 +47,7 @@ See `RUNBOOK.md` §3 for what to do with a 4.
 | `state_dir` (`/var/lib/albumctl`) | `albumctl` | `0750` | scan, thumbs |
 | `cache_dir` (`/var/cache/albumctl`) | `albumctl` | `0750` | thumbs, cache-gc |
 | `/etc/albumctl/albumctl.toml` | `root` | `0640` | you |
-| `/etc/systemd/system/albumctl-*.service` | `root` | `0644` | you |
+| `/etc/systemd/system/nasctl-*.service` | `root` | `0644` | you |
 
 Inside `state_dir`: `index.sqlite3` plus its WAL/SHM sidecars, `web.json` (the web
 service's own record of itself: pid, bind address, start time, version, schema),
@@ -67,63 +66,19 @@ Practical consequences:
 * The web service runs unprivileged and holds the index **read-only**: its handle
   refuses writes at the SQLite level, so a bug in the service cannot corrupt the
   index, and the index is not blocked for a running scan.
-* The cache is pruned only by `albumctl cache-gc`, only inside `cache_dir`, only
+* The cache is pruned only by `nasctl album cache-gc`, only inside `cache_dir`, only
   files matching this application's own hash-shaped names. There is no route, verb
   or flag anywhere that removes an original.
 
 ---
 
-## 3. The web interface
+## 3. The album API
 
-`albumctl serve` binds to the address in `[server].bind` — `127.0.0.1:8088` in the
-shipped example, and the recommended deployment binds the Tailscale address or
-loopback behind an existing reverse proxy. It serves:
-
-* the embedded single-page frontend (`/`), which is one HTML file, one CSS file
-  and one JS file, compiled into the binary: **no remote fonts, no CDN, no
-  analytics, no external API** (asserted by a test that greps the served assets);
-* `/api/v1/…` as specified in `API.md`: status, collections, a paginated media
-  list with date/directory/GPS/fallback/search filters, one item's metadata,
-  a thumbnail, the original, a download, and a timeline.
-
-Interface behaviour that follows from the constraints:
-
-* A missing thumbnail is answered **immediately with a placeholder SVG**; the
-  request never triggers decoding or an ffmpeg/exiftool subprocess.
-* A page holds at most 200 items and the frontend requests pages as it scrolls;
-  it does not build thousands of image elements and does not preload a library.
-* Clicking through to an original streams it with a bounded copy buffer — a 300 MiB
-  file costs the service about 16 kB of resident memory — and `Range` works, so
-  scrubbing a video does not pull the whole file.
-* Names, metadata and search results are inserted with `textContent`, never
-  `innerHTML`; hostile EXIF and hostile file names are carried as data (see the
-  e2e tests `TestHostileEXIFIsSurvivedButNotTrusted` and
-  `TestCraftedNamesAreInertInJSONAndOnDisk`).
-* The pause state is visible in the UI, and the UI offers no button that starts
-  work. There is no "generate thumbnails" action behind a browser click, by
-  design: browsing cannot add load.
-
-### Access control, stated plainly
-
-There is **no authentication**. This is not an oversight that the interface hides:
-the frontend and `doctor` both say so. Access control is the address it binds to
-and the network in front of it.
-
-* Bind loopback and reach it through an SSH tunnel or a proxy you already trust.
-* Bind the Tailscale address to reach it from your own devices on the tailnet.
-* **A private address is not a promise that every device on it is yours.** Anything
-  that can route to the bound address can browse the library, because the API is
-  read-only and unauthenticated. Do not publish the port, do not enable Funnel,
-  and do not put it behind a public reverse proxy.
-* A request is never able to choose a path: collections are referred to by their
-  configured code, media by numeric id, and everything the server opens is
-  resolved inside the collection root and re-checked for containment, symlink
-  escape and (for the index) the pinned filesystem identity.
-* Request concurrency, response size and page size are all capped, and those caps
-  are configuration, not hopes: `[server].max_concurrent_requests`,
-  `max_response_bytes`, and the 200-item page ceiling.
-
----
+The standalone `albumctl serve` viewer was removed. The read-only album API
+(`internal/albumapi`, routes in `API.md`) is mounted in process by `nasctl serve`
+and reached by the browser under `/api/v1/album/...`, behind the console's own
+authentication, roles and audit. `[server]` limits such as
+`max_concurrent_requests`, `max_concurrent_streams` and `page_max` still bound it.
 
 ## 4. What the service account must not be
 
@@ -137,14 +92,14 @@ and the network in front of it.
 ## 5. Quick reference
 
 ```sh
-albumctl doctor                      # before anything else: is this host safe to run on?
-albumctl status                      # what is running, what is pending, what is blocked
-albumctl scan --collection photos --limit 200 --dry-run
-albumctl scan --collection photos --limit 200
-albumctl thumbs --collection photos --limit 10 --max-runtime 5m
-albumctl pause --reason "array maintenance"
-albumctl resume                      # clears only the human pause
-albumctl cache-report                # never deletes
+nasctl album doctor                      # before anything else: is this host safe to run on?
+nasctl album status                      # what is running, what is pending, what is blocked
+nasctl album scan --collection photos --limit 200 --dry-run
+nasctl album scan --collection photos --limit 200
+nasctl album thumbs --collection photos --limit 10 --max-runtime 5m
+nasctl album pause --reason "array maintenance"
+nasctl album resume                      # clears only the human pause
+nasctl album cache-report                # never deletes
 ```
 
 Stage D (the first run on the target machine) is 10 files, then 50, one variable at
@@ -154,11 +109,11 @@ a time, and it starts only on explicit authorisation. It is described in
 
 # Part 2 — `nasctl`, the OneCloud Hub console
 
-`nasctl` is a **second binary** from the same source tree. It is not a mode of
-`albumctl` and it shares no runtime with it: the album service scans and decodes,
-the console reads and reports. That separation is what lets the console's import
-graph contain no decoder, which is what makes "an HTTP request cannot start a
-full-library scan" a property of the build rather than a promise.
+`nasctl serve` is the console. Album scanning and decoding run only in a separate
+`nasctl album` process that the console starts for an explicit, bounded task.
+The web handlers' import graph contains no decoder, which is what makes "an HTTP
+request cannot start a full-library scan" a property of the build rather than a
+promise.
 
 Full evidence, measurements and the list of unverified items are in
 `HUB-STAGE-B.md`.
@@ -193,7 +148,7 @@ their own authority and their browsing is not recorded.
   configuration validator**, so the flag cannot promise a capability the binary
   does not have.
 * **Scan or decode.** `album.scan` and `album.thumbs` are declared with the right
-  bounds but have no handler here; they belong to `albumctl`, which owns the
+  bounds; they run in a separate `nasctl album` process, which owns the
   resource guard and the worker isolation.
 * **Run a command.** There is no operation that executes a shell, and a test fails
   if one is added.

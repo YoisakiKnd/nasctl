@@ -1,5 +1,7 @@
 # albumctl — design
 
+> **2026-10 更新：** `albumctl` 已并入单一的 `nasctl` 二进制（`nasctl album ...`），独立的 `albumctl serve` 网页和远程相册模式已移除。下文中的 albumctl 指现在的 `nasctl album` 处理进程；隔离与资源边界不变。
+
 Phase A deliverable. This describes what was built, why the boundaries are where
 they are, and what each number is and is not a guarantee of.
 
@@ -29,8 +31,8 @@ in normal operation, no shared permissions:
 | Capability | Process | Writes | Reads |
 | --- | --- | --- | --- |
 | Browsing | `albumctl serve` (long-lived) | nothing | index, thumbnail cache, originals |
-| Directory / metadata scan | `albumctl scan` (bounded) | index only | media tree |
-| Thumbnail generation | `albumctl thumbs` (bounded) | index + cache | media tree |
+| Directory / metadata scan | `nasctl album scan` (bounded) | index only | media tree |
+| Thumbnail generation | `nasctl album thumbs` (bounded) | index + cache | media tree |
 
 The web service is the one process that faces the network, so it is given the
 smallest set of abilities. It holds a write-refusing handle on the index and
@@ -195,7 +197,7 @@ There are five independent ways heavy work stops, and they are ranked, because
 3. **The parent's resource poll.** Every second the parent samples the machine.
    Crossing a stop threshold, seeing swap being used, PSI pressure, or a rising
    cgroup peak aborts the *current file* and ends the run.
-4. **The persistent pause.** `albumctl pause` writes a durable flag. Every loop
+4. **The persistent pause.** `nasctl album pause` writes a durable flag. Every loop
    iteration re-reads it, so a pause lands within one file. The web service reads
    it too and never offers to start work.
 5. **The operator.** `SIGTERM` to the supervisor ends the loop at the next file
@@ -205,7 +207,7 @@ There are five independent ways heavy work stops, and they are ranked, because
 A stop caused by resource pressure is recorded as a **persistent trip**, and a
 trip blocks the next run. That is the mechanism behind "no immediate automatic
 restart after a resource stop": it is not a sleep, it is a state change, and it
-survives a reboot. `albumctl resume` clears it, deliberately, by hand.
+survives a reboot. `nasctl album resume` clears it, deliberately, by hand.
 
 Whether a worker is really gone is answered by looking for a process that is still
 *running*, not merely for a pid that still exists. A process that has exited but
@@ -288,7 +290,7 @@ cache directory, not a broken entry.
 **Cache:** separate files, sharded by a hash of the media key, with a configured
 byte and file ceiling and a percentage at which `doctor` warns. Thumbnails are
 never blobs inside the database, because a single file that grows without bound
-is exactly what cannot be pruned safely. Pruning (`albumctl cache-gc`) only ever
+is exactly what cannot be pruned safely. Pruning (`nasctl album cache-gc`) only ever
 removes files under the configured cache directory, only ones matching this
 application's own naming, and never touches an original or an index row.
 

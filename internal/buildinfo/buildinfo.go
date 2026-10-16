@@ -23,7 +23,7 @@ const Schema = 2
 
 // String returns a single line identifying the build.
 func String() string {
-	return fmt.Sprintf("albumctl %s (commit %s, built %s, target %s, runtime %s/%s)",
+	return fmt.Sprintf("nasctl %s (commit %s, built %s, target %s, runtime %s/%s)",
 		Version, Commit, BuildTime, Target, runtime.GOOS, runtime.GOARCH)
 }
 

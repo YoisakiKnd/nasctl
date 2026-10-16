@@ -9,28 +9,26 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/YoisakiKnd/nasctl/internal/config"
 )
 
-func TestClientUsesConfiguredCredentialAndRewritesMediaURLs(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "GET" || r.Header.Get("Authorization") != "Bearer album-secret" || r.Header.Get("Cookie") != "" {
+func TestClientSendsNoCredentialAndRewritesMediaURLs(t *testing.T) {
+	client, err := NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" || r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" {
 			t.Error("wrong upstream identity", r.Header)
 		}
 		switch r.URL.Path {
-		case "/gallery/api/v1/status":
+		case "/api/v1/status":
 			io.WriteString(w, `{"version":"test","paused":true}`)
-		case "/gallery/api/v1/collections":
+		case "/api/v1/collections":
 			io.WriteString(w, `{"items":[{"code":"photos","name":"Photos","media_count":1}]}`)
-		case "/gallery/api/v1/media":
+		case "/api/v1/media":
 			if r.URL.Query().Get("q") != "name & title" || r.URL.Query().Get("limit") != "1" {
 				t.Error(r.URL)
 			}
 			io.WriteString(w, `{"items":[{"id":7,"name":"<img>.jpg","thumb_url":"https://evil.invalid/steal","raw_url":"javascript:bad"}],"next_cursor":"opaque","total_estimate":2}`)
-		case "/gallery/api/v1/media/7":
+		case "/api/v1/media/7":
 			io.WriteString(w, `{"item":{"id":7,"name":"<img>.jpg"},"paths":{"display":"Photos/<img>.jpg"},"exif":{"Camera":"Test"}}`)
-		case "/gallery/api/v1/media/7/raw":
+		case "/api/v1/media/7/raw":
 			w.Header().Set("Content-Type", "video/mp4")
 			w.Write([]byte("stream"))
 		default:
@@ -38,8 +36,6 @@ func TestClientUsesConfiguredCredentialAndRewritesMediaURLs(t *testing.T) {
 			w.WriteHeader(404)
 		}
 	}))
-	defer server.Close()
-	client, err := New(config.Album{APIBase: server.URL + "/gallery", Token: "album-secret"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +69,7 @@ func TestClientRefusesRedirectsBadBodiesAndUnsafeParameters(t *testing.T) {
 	defer target.Close()
 	for _, scenario := range []string{"redirect", "credential", "large", "bad-json", "wrong-service", "too-many-items", "wrong-id"} {
 		t.Run(scenario, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			client, _ := NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch scenario {
 				case "redirect":
 					w.Header().Set("Location", target.URL)
@@ -93,8 +89,6 @@ func TestClientRefusesRedirectsBadBodiesAndUnsafeParameters(t *testing.T) {
 					io.WriteString(w, `{"item":{"id":2,"name":"different"}}`)
 				}
 			}))
-			defer server.Close()
-			client, _ := New(config.Album{APIBase: server.URL, Token: "album-secret"})
 			defer client.Close()
 			var err error
 			if scenario == "too-many-items" {
@@ -126,9 +120,7 @@ func TestClientRefusesRedirectsBadBodiesAndUnsafeParameters(t *testing.T) {
 
 func TestClientCancellationStopsUpstreamRequest(t *testing.T) {
 	entered, stopped := make(chan struct{}), make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { close(entered); <-r.Context().Done(); close(stopped) }))
-	defer server.Close()
-	client, _ := New(config.Album{APIBase: server.URL})
+	client, _ := NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { close(entered); <-r.Context().Done(); close(stopped) }))
 	defer client.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

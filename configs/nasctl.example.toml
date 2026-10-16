@@ -1,6 +1,8 @@
-# albumctl example configuration.
+# nasctl example configuration.
 #
 # Copy to /etc/albumctl/config.toml on the target machine and edit the paths.
+# (The /etc/albumctl, /var/lib/albumctl and /var/cache/albumctl locations are
+# kept from the former standalone album program so existing state carries over.)
 #
 # Every POLICY value below - every threshold, ceiling, timeout and format switch
 # - is the built-in default, so an option can simply be deleted to get the
@@ -13,13 +15,14 @@
 # believing a limit is in force when it is not.
 #
 # Check it without changing anything:
-#     albumctl doctor --config /etc/albumctl/config.toml
+#     nasctl doctor --config /etc/albumctl/config.toml
+#     nasctl album doctor --config /etc/albumctl/config.toml
 #
 # The paths here are placeholders. They are deliberately not the real ones.
 
 [server]
-# Bind address. Keep this on a private interface. The service has no
-# authentication of its own: the address IS the access control.
+# Bind address for nasctl serve when [hub] bind is not set. Keep this on a
+# private interface; it is part of the access control.
 #
 #   Tailscale only      the machine's 100.x.y.z tailnet address, e.g. 100.64.0.10
 #   Loopback only       "127.0.0.1:8088" plus an SSH tunnel
@@ -29,8 +32,7 @@
 bind = "127.0.0.1:8088"
 allow_non_private_bind = false
 
-# A shared token, if the tunnel is not enough for your situation. Empty means no
-# authentication, which is the default and is why the bind address matters.
+# A shared device token. Local accounts (docs/AUTH.md) are the usual way in.
 token = ""
 
 read_header_timeout = "10s"
@@ -39,8 +41,8 @@ write_timeout = "60s"
 idle_timeout = "60s"
 shutdown_timeout = "10s"
 
-# Concurrency and size limits. These exist so a browser that opens fifty tabs
-# cannot consume the machine.
+# Concurrency and size limits for the album API. These exist so a browser that
+# opens fifty tabs cannot consume the machine.
 max_concurrent_requests = 8
 max_concurrent_streams = 3
 page_default = 60
@@ -129,7 +131,7 @@ nice_level = 15
 ionice_class = "idle"
 
 # After a resource-pressure stop, heavy work stays blocked until an explicit
-# `albumctl resume`. This value is the earliest a manual resume is accepted.
+# `nasctl album resume`. This value is the earliest a manual resume is accepted.
 cooldown_after_trip = "30m"
 
 [decode]
@@ -179,7 +181,7 @@ video_poster_seek = "3s"
 video_probe = true
 
 [backup]
-# albumctl yields to the existing backup. It never stops, signals or reconfigures
+# Album processing yields to the existing backup. It never stops, signals or reconfigures
 # it, and it does not guess from process names: point this at the operator's own
 # status command, or list systemd units, or leave it empty.
 #
@@ -194,7 +196,7 @@ check_timeout = "5s"
 # Consulted with `systemctl is-active --quiet` when no command is set.
 systemd_units = []
 
-# albumctl is the lower-priority of the two, so it is the one that yields.
+# Album processing is the lower-priority of the two, so it is the one that yields.
 skip_thumbs_when_busy = true
 
 # false: an unanswerable backup question is noted and the run continues.
@@ -205,9 +207,8 @@ require_known = false
 # OneCloud Hub (nasctl)
 # ---------------------------------------------------------------------------
 #
-# The console is a separate process from the album service. It reads this same
-# file, and nothing in this section can widen what [server], [guard] or the
-# collections above allow.
+# Nothing in this section can widen what [server], [guard] or the collections
+# above allow.
 #
 # The whole section defaults to an empty console: no storage roots and no
 # integrations. Copying this file without editing it gives you a console that
@@ -222,19 +223,10 @@ require_known = false
 # setup = true
 
 # Local album reading is enabled by default, using paths.index_file and collections.
-# Install albumctl beside nasctl for explicitly requested bounded processing.
+# Explicit bounded processing re-executes this binary as `nasctl album ...`.
 # [hub.album]
 # mode = "local"
-# worker_binary = "/usr/local/bin/albumctl" # optional absolute processing path
 # Use mode = "disabled" to disable the album entirely.
-# Optional compatibility connection to a separate read-only album HTTP service:
-# No port or token is inferred. Use a literal private/loopback IP or localhost.
-# This credential belongs to albumctl; it is not the nasctl operator credential.
-# See docs/ALBUM.md. An explicit api_base selects remote mode automatically.
-# [hub.album]
-# api_base = "http://127.0.0.1:8088"
-# token = "replace-with-the-album-service-token"
-# public_url = "http://127.0.0.1:8088" # optional browser link, not needed to browse
 
 # Directories the file manager may browse. Each is addressed by its ID in every
 # request and in every API call - never by a path - so a request cannot name a

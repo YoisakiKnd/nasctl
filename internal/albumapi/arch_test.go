@@ -1,4 +1,4 @@
-package server_test
+package albumapi_test
 
 import (
 	"go/parser"
@@ -52,7 +52,7 @@ func TestWebServiceCannotReachADecoderOrAScanner(t *testing.T) {
 	// configured static directory. Rather than ban it outright, ban the two
 	// functions that turn it into a traversal primitive, and require that all
 	// path construction from user-visible data goes through fsutil.
-	pkgs := importGraph(t, root, modulePath+"/internal/server")
+	pkgs := importGraph(t, root, modulePath+"/internal/albumapi")
 
 	var reachable []string
 	for p := range pkgs {
@@ -84,7 +84,7 @@ func TestWebServiceCannotReachADecoderOrAScanner(t *testing.T) {
 	// The handler must not be able to construct a filesystem path from a
 	// request parameter. Assert no source file in the package mentions the
 	// primitives that would be needed.
-	assertNoSourceContains(t, filepath.Join(root, "internal", "server"), []string{
+	assertNoSourceContains(t, filepath.Join(root, "internal", "albumapi"), []string{
 		`filepath.Join(`,
 		`filepath.Clean(`,
 		`filepath.Abs(`,
@@ -122,8 +122,8 @@ func TestHeavyWorkersCannotReachTheWebService(t *testing.T) {
 	root := moduleRoot(t)
 	for _, worker := range []string{"internal/thumbs", "internal/scan"} {
 		pkgs := importGraph(t, root, modulePath+"/"+worker)
-		if pkgs[modulePath+"/internal/server"] {
-			t.Errorf("%s can reach internal/server; the decode path and the serving "+
+		if pkgs[modulePath+"/internal/albumapi"] {
+			t.Errorf("%s can reach internal/albumapi; the decode path and the serving "+
 				"path must be separable processes", worker)
 		}
 		for pkg := range pkgs {
@@ -303,7 +303,7 @@ func assertNoSourceContains(t *testing.T, dir string, forbidden []string) {
 		rel, _ := filepath.Rel(dir, path)
 		for _, bad := range forbidden {
 			if strings.Contains(string(data), bad) {
-				t.Errorf("internal/server/%s contains %s.\n"+
+				t.Errorf("internal/albumapi/%s contains %s.\n"+
 					"The web service must not be able to perform this operation; "+
 					"the capability belongs in the scan or thumbs task.", rel, bad)
 			}

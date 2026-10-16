@@ -44,7 +44,7 @@ func controlRig(t *testing.T, script string) (*Control, *config.Config, *files.M
 	if err := os.MkdirAll(cfg.Paths.StateDir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	binary := filepath.Join(dir, "albumctl")
+	binary := filepath.Join(dir, "nasctl")
 	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"+script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,9 @@ func TestDirectoryConfigurationIsBoundedDurableAndKeepsOriginals(t *testing.T) {
 }
 
 func TestWorkerUsesPrivateCredentialFreeSnapshotAndBoundedOutput(t *testing.T) {
-	c, cfg, _ := controlRig(t, `op="$1"
+	c, cfg, _ := controlRig(t, `[ "$1" = "album" ] || exit 4
+shift
+op="$1"
 shift
 [ "$1" = "--config" ] || exit 5
 conf="$2"

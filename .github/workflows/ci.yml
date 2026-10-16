@@ -165,7 +165,7 @@ jobs:
       - name: Assert the binaries are static and are ARM
         run: |
           fail=0
-          for bin in dist/albumctl-linux-armv7 dist/nasctl-linux-armv7; do
+          for bin in dist/nasctl-linux-armv7; do
             echo "--- $bin"
             # ELF 32-bit ARM EABI5.
             if ! file "$bin" | grep -q "ELF 32-bit LSB.*ARM"; then
@@ -190,7 +190,7 @@ jobs:
 
       - name: Smoke test under emulation
         # qemu is not the target, and this is a smoke test rather than a
-        # measurement: it proves the binaries start, parse a real configuration
+        # measurement: it proves the binary starts, parse a real configuration
         # and index a tree, on a CPU that is not the one they were compiled for.
         # Nothing here is evidence about memory use or speed on the onecloud.
         #
@@ -204,7 +204,7 @@ jobs:
 
           echo "--- version"
           qemu-arm-static dist/nasctl-linux-armv7 version
-          qemu-arm-static dist/albumctl-linux-armv7 version
+          qemu-arm-static dist/nasctl-linux-armv7 album version
 
           echo "--- build the fixture and a configuration for it"
           go run ./internal/synth/cmdgen /tmp/lib
@@ -225,7 +225,7 @@ jobs:
           EOF
 
           echo "--- scan the fixture with the ARM binary"
-          out="$(qemu-arm-static dist/albumctl-linux-armv7 scan \
+          out="$(qemu-arm-static dist/nasctl-linux-armv7 album scan \
                    --config /tmp/arm.toml --collection lib --limit 100)"
           echo "$out"
 
@@ -246,7 +246,6 @@ jobs:
         with:
           name: armv7-artefacts
           path: |
-            dist/albumctl-linux-armv7
             dist/nasctl-linux-armv7
             dist/SHA256SUMS
             dist/README.txt
@@ -371,26 +370,9 @@ jobs:
       - name: Desktop windows, drafts, geometry, mobile switching and session expiry
         run: node scripts/uitest/desktop.mjs http://127.0.0.1:18090 nasctl-ci-fixture-operator
 
-      - name: Album browsing through two real services with generated fixtures
-        run: |
-          go build -o /tmp/albumctl ./cmd/albumctl
-          go run ./scripts/uitest/seed-album --fixture-only --root /tmp/nasctl-ci-album
-          /tmp/albumctl serve --config /tmp/nasctl-ci-album/album.toml > /tmp/album-fixture.log 2>&1 &
-          /tmp/nasctl serve --config /tmp/nasctl-ci-album/hub.toml > /tmp/album-console.log 2>&1 &
-          ready=0
-          for i in $(seq 1 50); do
-            if curl -sf -o /dev/null -H 'Authorization: Bearer nasctl-disposable-album-token' http://127.0.0.1:18095/api/v1/status && curl -sf -o /dev/null http://127.0.0.1:18096/api/v1/auth/status; then
-              ready=1
-              break
-            fi
-            sleep 0.2
-          done
-          test "$ready" = 1
-          node scripts/uitest/album.mjs http://127.0.0.1:18096
-
       - name: Native album without a second HTTP service and real worker pause/resume
         run: |
-          go run ./scripts/uitest/seed-album --fixture-only --writable --root /tmp/nasctl-ci-native-album --hub-port 18099 --album-port 18100
+          go run ./scripts/uitest/seed-album --fixture-only --writable --root /tmp/nasctl-ci-native-album --hub-port 18099
           /tmp/nasctl serve --config /tmp/nasctl-ci-native-album/native.toml > /tmp/native-album.log 2>&1 &
           ready=0
           for i in $(seq 1 50); do
@@ -611,7 +593,7 @@ jobs:
         run: |
           {
             echo "### Linux $NASCTL_ARCH"
-            echo 'Matched nasctl + albumctl, configuration example, systemd unit and deployment docs.'
+            echo 'Single nasctl binary, configuration example, systemd unit and deployment docs.'
             echo 'Download the artifact above; verify its .tar.gz.sha256 before extracting.'
             echo 'This is a development build; installing on a NAS remains a separate step.'
             cat "dist/nasctl-linux-$NASCTL_ARCH.tar.gz.sha256"

@@ -50,10 +50,10 @@ func (s *Server) handleAlbumStatus(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &problem) {
 			message = problem.Message
 		}
-		writeJSON(w, 200, map[string]any{"configured": true, "connected": false, "mode": s.Album.Mode(), "error": message, "public_url": s.Album.PublicURL()})
+		writeJSON(w, 200, map[string]any{"configured": true, "connected": false, "mode": s.Album.Mode(), "error": message})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"configured": true, "connected": true, "mode": s.Album.Mode(), "index_ready": status.IndexReady, "version": status.Version, "paused": status.Paused, "pause_reason": status.PauseReason, "warnings": status.Warnings, "public_url": s.Album.PublicURL()})
+	writeJSON(w, 200, map[string]any{"configured": true, "connected": true, "mode": s.Album.Mode(), "index_ready": status.IndexReady, "version": status.Version, "paused": status.Paused, "pause_reason": status.PauseReason, "warnings": status.Warnings})
 }
 func (s *Server) handleAlbumCollections(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAlbum(w) {

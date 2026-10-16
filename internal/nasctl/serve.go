@@ -209,8 +209,6 @@ func cmdServe(ctx context.Context, env Env, cfg *config.Config, g globals, args 
 			defer albumControl.Close()
 			albumClient, err = album.NewHandler(albumControl.Reader)
 		}
-	case "remote":
-		albumClient, err = album.New(cfg.Hub.Album)
 	}
 	if err != nil {
 		fmt.Fprintf(env.Stderr, "nasctl: album setup: %v\n", err)

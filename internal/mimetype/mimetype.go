@@ -3,7 +3,7 @@
 // It is its own package, with no file I/O and no imports besides strings, so
 // that the read-only web service can label a response without pulling a
 // decoder, a header parser or a scanner into its import graph. That property is
-// asserted by internal/server/arch_test.go rather than merely intended.
+// asserted by internal/albumapi/arch_test.go rather than merely intended.
 package mimetype
 
 import "strings"

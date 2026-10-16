@@ -25,7 +25,7 @@ type admittedLaunch struct {
 
 func newAlbumLauncher(cfg *config.Config) *albumLauncher {
 	l := &albumLauncher{}
-	// Other platforms retain albumctl's explicit resource refusal. There is no
+	// Other platforms retain the album task's explicit resource refusal. There is no
 	// browser switch to disable the required Linux cgroup policy.
 	if runtime.GOOS != "linux" || !cfg.Guard.RequireCgroupIsolation {
 		return l
@@ -95,7 +95,7 @@ func resetAlbumGroup(m *resource.CgroupManager) error {
 	if strings.TrimSpace(string(b)) != "" {
 		return errors.New("album launch: task cgroup still has live processes; refusing reuse")
 	}
-	// albumctl leaves its empty supervisor directory. Remove only its two
+	// The album supervisor leaves its empty directory. Remove only its two
 	// known child directories; never recursively remove or kill unknown tasks.
 	for _, n := range []string{"worker", "sup"} {
 		if e = os.Remove(filepath.Join(m.WorkDir, n)); e != nil && !os.IsNotExist(e) {
