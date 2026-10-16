@@ -11,6 +11,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/YoisakiKnd/nasctl/internal/cli"
 	"github.com/YoisakiKnd/nasctl/internal/launchgate"
@@ -19,10 +20,11 @@ import (
 
 func main() {
 	args := os.Args[1:]
+	if rest, ok := albumCommand(args); ok {
+		os.Exit(runAlbum(rest))
+	}
 	if len(args) > 0 {
 		switch args[0] {
-		case "album":
-			os.Exit(runAlbum(args[1:]))
 		case "exec-album-task":
 			// The console starts a bounded thumbnail supervisor here and holds it
 			// at the private gate until it is inside its task cgroup.
@@ -44,6 +46,27 @@ func main() {
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
 	}))
+}
+
+// albumCommand recognises `nasctl [--config PATH] [--json] album ...`, so the
+// global flags may precede the verb as they do for every other command. They
+// are moved after the album arguments, where the album command line reads them.
+func albumCommand(args []string) ([]string, bool) {
+	var globals []string
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case a == "album":
+			return append(append([]string{}, args[i+1:]...), globals...), true
+		case (a == "--config" || a == "-c") && i+1 < len(args):
+			globals = append(globals, "--config", args[i+1])
+			i++
+		case strings.HasPrefix(a, "--config=") || a == "--json":
+			globals = append(globals, a)
+		default:
+			return nil, false
+		}
+	}
+	return nil, false
 }
 
 func runAlbum(args []string) int {

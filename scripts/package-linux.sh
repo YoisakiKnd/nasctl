@@ -46,10 +46,10 @@ for nasctl_program in nasctl; do
   fi
 done
 cp configs/nasctl.example.toml "$nasctl_package/configs/"
-cp systemd/nasctl-web.service "$nasctl_package/systemd/"
+cp systemd/nasctl-web.service systemd/nasctl-album-thumbs.service systemd/nasctl-album-thumbs.timer "$nasctl_package/systemd/"
 cp LICENSE "$nasctl_package/"
 cp -R third_party/licenses "$nasctl_package/licenses"
-for nasctl_doc in DEPLOYMENT AUTH ALBUM ANIME FILES MEDIA BACKUPS STATE-BACKUPS SETTINGS PHOTO-VAULT WEBDAV-BACKUP DESKTOP-APPS ONECLOUD-MEDIA; do
+for nasctl_doc in DEPLOYMENT UPGRADE FRONTEND AUTH ALBUM ANIME FILES MEDIA BACKUPS STATE-BACKUPS SETTINGS PHOTO-VAULT WEBDAV-BACKUP DESKTOP-APPS ONECLOUD-MEDIA; do
   cp "docs/$nasctl_doc.md" "$nasctl_package/docs/"
 done
 {
@@ -62,6 +62,7 @@ done
   echo 'Verify inside this directory: sha256sum -c SHA256SUMS'
   echo 'Install the single nasctl binary; album processing runs as `nasctl album` on demand.'
   echo 'Follow docs/DEPLOYMENT.md for first setup, permissions and upgrades.'
+  echo 'Upgrading from 0.2.x or 0.1.x: read docs/UPGRADE.md first; albumctl is now nasctl album.'
   if [[ -n ${RELEASE_VERSION:-} ]]; then
     echo "Release-version build: $nasctl_version. Publication is controlled by the release workflow."
   else

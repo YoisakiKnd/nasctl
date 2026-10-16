@@ -111,6 +111,8 @@ journalctl -u nasctl-web.service -n 50
 
 ## 升级与检查点
 
+跨版本的手工迁移步骤（例如升级到 0.3.0 时合并 albumctl）见 [UPGRADE.md](UPGRADE.md)。
+
 1. 记录当前二进制的 SHA-256、源码版本、工具链、配置与单元／drop-in。准备新
    二进制，先验证构建和摘要，不直接覆盖运行中的文件。
 2. 停止 nasctl、`nasctl album` 任务（从旧版升级时还有 albumctl 服务／任务）及所有状态写入 CLI。不要删除锁文件来绕过

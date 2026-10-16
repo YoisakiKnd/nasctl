@@ -13,7 +13,7 @@
 Web 查询层的导入图仍不包含扫描器、解码器或子进程实现，只有经权限与资源检查的
 显式任务入口能启动有数量、时间上限的后台处理进程。
 
-> 从旧版升级：原来的 `albumctl` 已并入 `nasctl album`，`albumctl serve` 独立网页和
+> 从 0.2.x 或更早版本升级请先读 [`docs/UPGRADE.md`](docs/UPGRADE.md)。原来的 `albumctl` 已并入 `nasctl album`，`albumctl serve` 独立网页和
 > `hub.album.api_base` 远程模式已移除。配置、索引和缓存路径（`/etc/albumctl`、
 > `/var/lib/albumctl`）保持不变，可直接沿用；systemd 定时器改为 `nasctl-album-thumbs`。
 

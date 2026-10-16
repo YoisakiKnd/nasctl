@@ -16,7 +16,7 @@ separate process and cgroup; nothing else needs installing. Import-graph tests
 keep decoders, scanners and subprocess implementations out of the web query
 layer; explicit operator tasks pass admission and resource checks first.
 
-> Upgrading: the former `albumctl` binary is now `nasctl album`; the standalone
+> Upgrading from 0.2.x or earlier: read [`docs/UPGRADE.md`](docs/UPGRADE.md) first. The former `albumctl` binary is now `nasctl album`; the standalone
 > `albumctl serve` viewer and the `hub.album.api_base` remote mode were removed.
 > Config, index and cache paths (`/etc/albumctl`, `/var/lib/albumctl`) are
 > unchanged; the systemd timer is now `nasctl-album-thumbs`.
