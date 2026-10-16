@@ -1,18 +1,18 @@
 import {JSDOM,VirtualConsole} from 'jsdom';
 const base=process.argv[2]||'http://127.0.0.1:18101',errors=[],vc=new VirtualConsole();vc.on('jsdomError',(error)=>errors.push(error.message));
 const request=(path,options={})=>fetch(new URL(path,base),options);
-const dom=new JSDOM(await(await request('/')).text(),{url:base+'/#media',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:vc});
+const dom=new JSDOM(await(await request('/')).text(),{url:base+'/#admin/anime',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:vc});
 const w=dom.window,d=w.document,delay=(ms)=>new Promise((resolve)=>setTimeout(resolve,ms));
 const check=(ok,label)=>{if(!ok)throw new Error(label);console.log('ok:',label);};
 async function wait(test,label){const until=Date.now()+10000;while(Date.now()<until){if(test())return;await delay(25);}throw new Error('timed out: '+label);}
-const button=(label,scope=d)=>[...scope.querySelectorAll('button')].find((node)=>node.getAttribute('aria-label')===label||node.textContent.trim()===label);
+const button=(label,scope=d.querySelector('.page.active')||d)=>[...scope.querySelectorAll('button')].find((node)=>node.getAttribute('aria-label')===label||node.textContent.trim()===label);
 const card=()=>[...d.querySelectorAll('.subscription-card')].find((node)=>node.textContent.includes('Generated Metadata Fixture'));
 w.fetch=request;w.AbortController=AbortController;w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
 w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
 function input(label,value){const node=d.querySelector(`[aria-label="${label}"]`);node.value=value;node.dispatchEvent(new w.Event('input',{bubbles:true}));}
 async function openCleanup(){button('清理历史',card()).click();await wait(()=>d.querySelector('[aria-label="确认历史清理订阅名称"]'),'cleanup range loaded');}
 try{
- w.eval(await(await request('/app.js')).text());await wait(()=>card(),'history fixture');button('管理追番').click();await delay(0);
+ w.eval(await(await request('/app.js')).text());await wait(()=>card(),'history fixture');
  const exported=await request(card().querySelector('a[download]').getAttribute('href'));check(exported.ok&&exported.headers.get('content-disposition').startsWith('attachment;'),'history export attachment');
  const lines=(await exported.text()).trim().split('\n').map((line)=>JSON.parse(line));check(lines[0].format==='nasctl-anime-history'&&lines.at(-1).complete&&lines.at(-1).episodes===2,'consistent complete history contains both archived episodes');
  button('归档',card()).click();await wait(()=>d.querySelector('dialog'),'archive confirmation');button('确认归档订阅',d.querySelector('dialog')).click();

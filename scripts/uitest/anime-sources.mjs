@@ -3,13 +3,13 @@ import {JSDOM,VirtualConsole} from 'jsdom';
 const base=process.argv[2]||'http://127.0.0.1:18104';
 const marker=await fetch(base+'/api/v1/files/download?root=source&path=.nasctl-ui-fixture');if(!marker.ok||await marker.text()!=='nasctl-backup-fixture-v1\n')throw Error('generated source fixture required');
 const title='Generated Source '+Date.now(),errors=[],vc=new VirtualConsole();vc.on('jsdomError',e=>errors.push(e.message));
-const dom=new JSDOM(await(await fetch(base+'/')).text(),{url:base+'/#media',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:vc});const w=dom.window,d=w.document,delay=ms=>new Promise(r=>setTimeout(r,ms));
+const dom=new JSDOM(await(await fetch(base+'/')).text(),{url:base+'/#admin/anime',runScripts:'outside-only',pretendToBeVisual:true,virtualConsole:vc});const w=dom.window,d=w.document,delay=ms=>new Promise(r=>setTimeout(r,ms));
 let saves=0, searches=[],mismatch=false;
 w.fetch=(path,options={})=>{const u=new URL(path,base);if(u.pathname==='/api/v1/anime/sources/search'){searches.push([u.searchParams.get('provider'),u.searchParams.get('q')]);return Promise.resolve(Response.json({results:[{id:u.searchParams.get('provider')==='bangumi'?42:123,name:title,original_name:'Generated original',url:'https://mikanani.me/Home/Bangumi/123'}],page:1,has_more:false}));}if(u.pathname==='/api/v1/anime/sources/mikan/123')return Promise.resolve(Response.json({id:123,name:title,bangumi_id:mismatch?43:42,url:'https://mikanani.me/Home/Bangumi/123',feeds:[{id:7,name:'Generated subtitle group',url:'https://mikanani.me/RSS/Bangumi?bangumiId=123&subgroupid=7'}]}));if(u.pathname==='/api/v1/anime/subscriptions'&&options.method==='POST')saves++;return fetch(u,options);};
 w.AbortController=AbortController;w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','')};w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open')};
 const check=(ok,label)=>{if(!ok)throw Error(label);console.log('ok:',label)};
 async function wait(fn,label){const end=Date.now()+10000;while(Date.now()<end){if(fn())return;await delay(20)}throw Error('timeout '+label+' '+d.querySelector('[role=alert]')?.textContent)}
-const button=(text,scope=d)=>[...scope.querySelectorAll('button')].find(n=>n.textContent.trim()===text);
+const button=(text,scope=d.querySelector('.page.active')||d)=>[...scope.querySelectorAll('button')].find(n=>n.textContent.trim()===text);
 async function click(text,scope=d){await wait(()=>button(text,scope)&&!button(text,scope).disabled,'button '+text);button(text,scope).click();await delay(0)}
 function input(selector,value){const n=d.querySelector(selector);if(!n)throw Error(selector);n.value=value;n.dispatchEvent(new w.Event(n.tagName==='SELECT'?'change':'input',{bubbles:true}))}
 try{

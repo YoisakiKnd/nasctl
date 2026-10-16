@@ -367,8 +367,8 @@ jobs:
       - name: Anime metadata selection and reversible subscription management
         run: node scripts/uitest/anime-management.mjs http://127.0.0.1:18090 nasctl-ci-fixture-operator
 
-      - name: Desktop windows, drafts, geometry, mobile switching and session expiry
-        run: node scripts/uitest/desktop.mjs http://127.0.0.1:18090 nasctl-ci-fixture-operator
+      - name: User and admin shell, keep-alive pages, role routing and session expiry
+        run: node scripts/uitest/shell.mjs http://127.0.0.1:18090 nasctl-ci-fixture-operator
 
       - name: Native album without a second HTTP service and real worker pause/resume
         run: |

@@ -44,10 +44,11 @@ try{
  await delay(0);await wait(()=>!d.querySelector('.loading-state')&&files().length>=1,'bounded real filename search');check(option(fileName),'search result matches filename');
  check(!d.querySelector('.finder-entry script,.finder-entry img'),'filenames never become executable markup or eager original image loads');
  for(let count=2;count<8;count++){named('新建位置标签').click();await delay(0);}check(d.querySelectorAll('[role="tab"]').length===8&&named('新建位置标签').disabled,'location tabs have an eight-tab cap');
- const appSearch=d.querySelector('input[aria-label="搜索应用或文件"]');appSearch.value='设置';appSearch.dispatchEvent(new w.Event('input',{bubbles:true}));await delay(0);check(d.querySelectorAll('.desktop-app').length===1,'desktop application search filters real launchers');
- d.querySelector('.desktop-search').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await wait(()=>d.querySelector('.app-window.active')?.dataset.app==='settings','Enter launches filtered application');
- appSearch.value=fileName;appSearch.dispatchEvent(new w.Event('input',{bubbles:true}));await delay(0);d.querySelector('.desktop-file-search').click();
- await wait(()=>d.querySelector('.app-window.active')?.dataset.app==='files'&&!d.querySelector('.file-explorer .loading-state')&&option(fileName),'explicit desktop file search opens the configured root');check(d.querySelector('input[aria-label="搜索文件"]').value===fileName,'desktop search is forwarded without saving a new backend operation');
+ w.location.hash='home';await wait(()=>d.querySelector('input[aria-label="首页搜索文件"]:not(:disabled)'),'home search is ready');
+ const homeSearch=d.querySelector('input[aria-label="首页搜索文件"]');homeSearch.value=fileName;homeSearch.dispatchEvent(new w.Event('input',{bubbles:true}));await delay(0);
+ d.querySelector('.home-search').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+ await wait(()=>d.querySelector('.page.active')?.dataset.page==='files'&&!d.querySelector('.page.active .file-explorer .loading-state')&&option(fileName),'home file search opens the configured root');check(d.querySelector('.page.active input[aria-label="搜索文件"]').value===fileName,'home search is forwarded without saving a new backend operation');
+ check(d.querySelectorAll('[role="tab"]').length===8,'files page keeps its tabs while another page was shown');
  check(errors.length===0,'no DOM errors: '+errors.join('; '));
  console.log('Finder navigation, selection, tabs, pins, recent, keyboard menu and search passed.');
 }finally{dom.window.close();}

@@ -38,14 +38,14 @@ const click = (selector) => {const node = d.querySelector(selector); check(node,
 const input = (selector,value) => {const node = d.querySelector(selector); check(node,'input exists: '+selector); node.value = value; node.dispatchEvent(new w.Event('input',{bubbles:true}));};
 async function route(view) {
   w.location.hash = view;
-  await wait(() => d.querySelector('.app-window.active .content')?.getAttribute('aria-label') === ({overview:'概览',files:'文件管理',media:'追番',jobs:'任务中心',settings:'设置',album:'相册',backup:'备份'})[view],'route '+view);
+  await wait(() => d.querySelector('.page.active .content')?.getAttribute('aria-label') === ({overview:'概览',files:'文件管理',media:'追番','admin/anime':'追番管理',jobs:'任务中心',settings:'系统设置',album:'相册',backup:'备份'})[view],'route '+view);
   await pause(80);
 }
 try {
   const js = await fetch(base+'/app.js',{headers}); check(js.ok,'compiled Svelte bundle responds');
   w.eval(await js.text());
   await wait(() => text('#overview-stamp').includes('更新于'),'overview resolves');
-  check(d.querySelectorAll('.nav-link').length === 7,'all seven navigation entries are preserved');
+  check(d.querySelectorAll('.sidebar-nav .nav-link').length === 8,'all eight admin pages are listed for a device manager');
   check(!text('.system-status').includes('正在连接'),'global status resolves');
   await route('files');
   await wait(() => d.querySelectorAll('.file-name').length > 0,'file listing resolves');
@@ -71,7 +71,10 @@ try {
   click('dialog button[aria-label="关闭对话框"]');
   await wait(() => !d.querySelector('dialog'),'file preview closes');
   await route('media');
-  await wait(() => !d.querySelector('.loading-state'),'anime status resolves');
+  await wait(() => !d.querySelector('.page.active .loading-state'),'anime status resolves');
+  check(![...d.querySelectorAll('.page.active button')].some((node) => node.textContent.includes('添加订阅')),'the watching page has no subscription management');
+  await route('admin/anime');
+  await wait(() => !d.querySelector('.page.active .loading-state'),'anime management resolves');
   const add = [...d.querySelectorAll('button')].find((node) => node.textContent.includes('添加订阅') && !node.disabled);
   if (add) {
     const fixtureName = 'UI Harness ' + Date.now();
@@ -89,29 +92,28 @@ try {
     check(text('.feed-preview').includes('不在集数范围内'),'preview explains rejected releases');
     mockPreview = false;
     d.querySelector('dialog form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
-    await wait(() => !d.querySelector('dialog') && text('.subscription-grid').includes(fixtureName),'subscription is saved through the real API');
+    await wait(() => !d.querySelector('dialog') && text('.page.active .subscription-grid').includes(fixtureName),'subscription is saved through the real API');
     const subscriptionResponse = await fetch(base + '/api/v1/anime/subscriptions',{headers});
     const saved = (await subscriptionResponse.json()).subscriptions.find((sub) => sub.title === fixtureName);
     check(saved.start_episode === 5 && saved.end_episode === 12,'episode range is persisted by the real API');
-    click('button[aria-label="管理追番"]');
-    await wait(() => d.querySelector('.stat-strip'),'subscription management opens');
+    check(d.querySelector('.page.active .stat-strip'),'subscription management shows statistics');
     const card = [...d.querySelectorAll('.subscription-card')].find((node) => node.textContent.includes(fixtureName));
     [...card.querySelectorAll('button')].find((node) => node.textContent.includes('编辑')).click();
     await wait(() => d.querySelector('dialog[open]'),'edit dialog opens');
     d.querySelector('input[name="enabled"]').click();
     d.querySelector('dialog form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
     await wait(() => !d.querySelector('dialog') && [...d.querySelectorAll('.subscription-card')].some((node) => node.textContent.includes(fixtureName) && node.textContent.includes('已暂停')),'subscription can be paused');
-  } else check(text('.empty-state').includes('尚未启用'),'disabled anime module is explained');
+  } else check(text('.page.active .empty-state').includes('尚未启用'),'disabled anime module is explained');
   await route('jobs'); await wait(() => !d.querySelector('.loading-state'),'jobs resolve');
   await route('settings'); await wait(() => !text('.panel-heading .badge').includes('读取中'),'settings resolve');
   check(d.querySelector('.mode-options'),'mode controls are preserved');
   await route('album'); check(d.querySelector('.album-view'),'integrated album entry is preserved');
   await route('backup');
   await wait(()=>d.querySelector('.cloud-backup'),'WebDAV backup is the default view');
-  [...d.querySelectorAll('.app-window.active button')].find(node=>node.textContent.trim()==='本地副本').click();
-  await wait(()=>d.querySelector('.backup-plans')&&d.querySelector('.backup-history'),'native backup view'); check(!text('.app-window.active .content').includes('尚未接入'),'native backup plan/history replaces placeholder');
+  [...d.querySelectorAll('.page.active button')].find(node=>node.textContent.trim()==='本地副本').click();
+  await wait(()=>d.querySelector('.backup-plans')&&d.querySelector('.backup-history'),'native backup view'); check(!text('.page.active .content').includes('尚未接入'),'native backup plan/history replaces placeholder');
   const before = d.documentElement.dataset.theme;
-  click('.topbar-actions button');
+  click('.theme-toggle');
   await pause(50);
   check(before !== d.documentElement.dataset.theme,'theme toggle works');
   check(logs.length === 0,'no jsdom errors: '+logs.join('; '));

@@ -20,8 +20,8 @@ never writes credentials to localStorage. Theme, file-view preference and explic
 pinned root-relative folder locations are stored locally. Recent files and location
 tabs live only in the mounted file app; no file contents are stored in the browser.
 
-The desktop and Finder-style redesign plan was reviewed with Antigravity Claude
-Opus 5.5 (High), then implemented here. See [the plan](../docs/FRONTEND-REDESIGN.md).
+The UI is split into user pages and an admin console; routes live in
+`src/lib/routes.js`. The earlier desktop plan is in [the plan](../docs/FRONTEND-REDESIGN.md).
 Details and validation
 limits are in [docs/FRONTEND.md](../docs/FRONTEND.md). The DOM harness in
 `scripts/uitest` exercises the compiled bundle against a fixture Go server.

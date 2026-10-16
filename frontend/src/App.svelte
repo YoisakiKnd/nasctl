@@ -1,91 +1,67 @@
 <script>
   import { onMount } from 'svelte';
   import { api } from './lib/api.js';
-  import { bytes, modeLabels } from './lib/format.js';
-  import { fitWindow, newWindow } from './lib/windows.js';
+  import { modeLabels } from './lib/format.js';
+  import { userPages, allowedAdminPages, resolve, pageInfo, roleOf } from './lib/routes.js';
+  import { loadTheme, applyTheme } from './lib/theme.js';
   import Icon from './components/Icon.svelte';
-  import AppWindow from './components/AppWindow.svelte';
-  import { appDestination } from './lib/app-links.js';
-  import DesktopApps from './components/DesktopApps.svelte';
-  import DesktopLandscape from './components/DesktopLandscape.svelte';
-  import Anime from './views/Anime.svelte';
-  import Album from './views/Album.svelte';
-  import Backup from './views/Backup.svelte';
-  import Overview from './views/Overview.svelte';
-  import Files from './views/Files.svelte';
-  import Jobs from './views/Jobs.svelte';
-  import Settings from './views/Settings.svelte';
+  import Page from './components/Page.svelte';
   import Login from './components/Login.svelte';
-  import AccountPassword from './components/AccountPassword.svelte';
+  import Home from './views/Home.svelte';
+  import Files from './views/Files.svelte';
+  import Album from './views/Album.svelte';
+  import Anime from './views/Anime.svelte';
+  import Me from './views/Me.svelte';
+  import Overview from './views/Overview.svelte';
+  import Jobs from './views/Jobs.svelte';
+  import AlbumAdmin from './views/admin/AlbumAdmin.svelte';
+  import Backup from './views/Backup.svelte';
+  import Users from './views/admin/Users.svelte';
+  import System from './views/admin/System.svelte';
+  import Logs from './views/admin/Logs.svelte';
 
-  const navigation = [
-    {id:'overview',label:'概览',icon:'overview',hint:'设备与存储',color:'teal'},
-    {id:'files',label:'文件管理',icon:'folder',hint:'浏览与整理',color:'blue'},
-    {id:'album',label:'相册',icon:'album',hint:'照片与视频',color:'rose'},
-    {id:'media',label:'追番',icon:'anime',hint:'订阅与媒体库',color:'violet'},
-    {id:'backup',label:'备份',icon:'backup',hint:'文件副本',color:'amber'},
-    {id:'jobs',label:'任务中心',icon:'jobs',hint:'进度与记录',color:'teal'},
-    {id:'settings',label:'设置',icon:'settings',hint:'设备偏好',color:'slate'},
-  ];
-  let theme = $state('light'), snapshot = $state(null), error = $state(''), loading = $state(false);
+  let theme = $state('system'), snapshot = $state(null), error = $state(''), loading = $state(false);
   let auth = $state(null), authError = $state(''), authPending = $state(false);
-  let windows = $state([]), active = $state(''), layer = 10;
-  let areaWidth = $state(1200), areaHeight = $state(680), mobile = $state(false), now = $state(new Date());
-  let customApps=$state([]);
-  const shownCustomApps=$derived(customApps.filter(item=>(item.name+' '+item.url).toLowerCase().includes(appQuery.trim().toLowerCase())));
-  let appQuery=$state(''), fileSearch=$state(null), searchNumber=0;
-  const visibleApps=$derived(navigation.filter(item=>auth?.role==='viewer'?['overview','files','album','media'].includes(item.id):auth?.role==='operator'?['overview','files','album','media','jobs'].includes(item.id):true));
-  const shownApps=$derived(visibleApps.filter((item)=>(item.label+item.hint+item.id).toLowerCase().includes(appQuery.trim().toLowerCase())));
-  const searchRoot=$derived(roots.find((item)=>item.available));
-  const memoryPercent=$derived(snapshot?.resources?.mem_total_kb>0?Math.round(100*(1-snapshot.resources.mem_available_kb/snapshot.resources.mem_total_kb)):null);
-  const roots = $derived(snapshot?.files?.roots || []);
-  const readOnly = $derived(!snapshot || snapshot.read_only || auth?.principal === 'ai'||auth?.read_only_user);
+  let current = $state('home'), visited = $state([]), drawer = $state(false), fileSearch = $state(null), searchNumber = 0;
   let controller, disposed = false, generation = 0;
-  function resize() {
-    mobile = window.innerWidth <= 720;
-    areaWidth = window.innerWidth;
-    areaHeight = Math.max(200,window.innerHeight-144);
-    windows = windows.map((frame)=>fitWindow(frame,areaWidth,areaHeight));
+
+  const adminPages = $derived(auth?.authenticated ? allowedAdminPages(auth) : []);
+  const inAdmin = $derived(current === 'admin' || current.startsWith('admin/'));
+  const readOnly = $derived(!snapshot || snapshot.read_only || auth?.principal === 'ai' || auth?.read_only_user);
+  const canConfigure = $derived(auth?.can_manage_device !== false);
+  const role = $derived(roleOf(auth));
+  const groups = $derived([...new Set(adminPages.map((page) => page.group))].map((group) => ({group, pages:adminPages.filter((page) => page.group === group)})));
+  const healthy = $derived(snapshot && ['normal','maintenance'].includes(snapshot.mode?.mode));
+  const displayName = $derived(auth?.display_name || auth?.name || (auth?.principal === 'local' ? '本机操作者' : '我'));
+
+  function route() {
+    if (!auth?.authenticated) return;
+    const next = resolve(window.location.hash, auth);
+    if (window.location.hash.replace(/^#\/?/,'') !== next && !(next === 'home' && !window.location.hash.replace(/^#\/?/,''))) history.replaceState(null, '', '#' + next);
+    current = next; drawer = false;
+    if (!visited.includes(next)) visited = [...visited, next];
+    if (next === 'home' || next === 'admin') refresh();
   }
-  function remember(id) {history.replaceState(null,'',window.location.pathname+window.location.search+(id?'#'+id:''));}
-  function focus(id) {
-    if (active===id && !windows.find((frame)=>frame.id===id)?.minimized) return;
-    active=id; windows=windows.map((frame)=>frame.id===id?{...frame,minimized:false,z:++layer}:frame); remember(id);
-  }
-  function open(id) {
-    if (!auth?.authenticated || !visibleApps.some((item)=>item.id===id)) return;
-    if (!windows.some((frame)=>frame.id===id)) windows=[...windows,newWindow(id,windows.length%5,areaWidth,areaHeight,++layer)];
-    focus(id);
-  }
-  function nextActive() { active=[...windows].filter((frame)=>!frame.minimized).sort((a,b)=>b.z-a.z)[0]?.id || ''; remember(active); }
-  function change(id,next) {
-    windows=windows.map((frame)=>frame.id===id?{...next,z:frame.z}:frame);
-    if(next.minimized && active===id) nextActive();
-  }
-  function close(id) { windows=windows.filter((frame)=>frame.id!==id); if(active===id) nextActive(); }
-  function desktop() { windows=windows.map((frame)=>({...frame,minimized:true})); active=''; remember(''); }
-  function searchFiles(){if(!appQuery.trim() || !searchRoot)return;fileSearch={id:++searchNumber,q:appQuery.trim().slice(0,128),root:searchRoot.id};open('files');}
-  function searchApps(event){event.preventDefault();if(shownApps.length===1&&!shownCustomApps.length)open(shownApps[0].id);else if(!shownApps.length&&shownCustomApps.length===1)window.open(appDestination(shownCustomApps[0].url,window.location.hostname),'_blank','noopener,noreferrer');else if(!shownApps.length&&!shownCustomApps.length)searchFiles();}
-  function route() { const hash=window.location.hash.slice(1); if(navigation.some((item)=>item.id===hash)) open(hash); }
-  function toggleTheme() {
-    theme = theme === 'light' ? 'dark' : 'light'; document.documentElement.dataset.theme = theme;
-    try {localStorage.setItem('nasctl-theme',theme);} catch { /* storage can be disabled */ }
-  }
+  function go(id) { if (window.location.hash !== '#' + id) window.location.hash = id; else route(); }
+  function searchFiles(request) { fileSearch = {...request, id:++searchNumber}; go('files'); }
+  function setTheme(value) { theme = value; applyTheme(value); }
+
   async function refresh() {
     if (!auth?.authenticated) return;
-    const current = ++generation; controller?.abort(); controller = new AbortController(); loading = true;
-    try { const data = await api('/api/v1/overview',{signal:controller.signal}); if (!disposed && current === generation) {snapshot = data; error = '';} }
-    catch (failure) {if (!disposed && current === generation && failure.name !== 'AbortError') error = failure.message;}
-    finally {if (!disposed && current === generation) loading = false;}
+    const mine = ++generation; controller?.abort(); controller = new AbortController(); loading = true;
+    try { const data = await api('/api/v1/overview',{signal:controller.signal}); if (!disposed && mine === generation) {snapshot = data; error = '';} }
+    catch (failure) {if (!disposed && mine === generation && failure.name !== 'AbortError') error = failure.message;}
+    finally {if (!disposed && mine === generation) loading = false;}
   }
-  function expired() { auth = {...auth, required:true, authenticated:false}; windows=[]; active=''; customApps=[]; appQuery=''; fileSearch=null; snapshot = null; error = ''; controller?.abort(); ++generation; }
+  function reset() { visited = []; current = 'home'; snapshot = null; error = ''; fileSearch = null; drawer = false; controller?.abort(); ++generation; }
+  function expired() { auth = {...auth, required:true, authenticated:false}; reset(); }
   async function checkAuth() {
     if (authPending || disposed) return;
     authPending = true; authError = '';
     try {
       const result = await api('/api/v1/auth/status'); if (disposed) return;
       auth = result;
-      if (result.authenticated) { await refresh(); route(); } else {windows=[];active='';snapshot=null;appQuery='';fileSearch=null;controller?.abort();++generation;}
+      if (result.authenticated) { visited = []; route(); if (current !== 'home' && current !== 'admin') refresh(); } else reset();
     } catch (failure) { if (!disposed) authError = failure.message; }
     finally { if (!disposed) authPending = false; }
   }
@@ -96,56 +72,77 @@
     finally { authPending = false; }
   }
   onMount(() => {
-    try {theme = localStorage.getItem('nasctl-theme') === 'dark' ? 'dark' : 'light';} catch {theme = 'light';}
-    document.documentElement.dataset.theme = theme;
-    resize(); checkAuth();
+    theme = loadTheme();
+    checkAuth();
     window.addEventListener('hashchange',route); window.addEventListener('nasctl:unauthorized',expired);
-    const poll = () => {if (!document.hidden) {now=new Date(); refresh();}};
+    // The overview feeds the home storage card and the admin dashboard only.
+    const poll = () => {if (!document.hidden && (current === 'home' || current === 'admin')) refresh();};
     const interval = setInterval(poll,15000); document.addEventListener('visibilitychange',poll);
     return () => {disposed = true; controller?.abort(); clearInterval(interval); window.removeEventListener('hashchange',route); window.removeEventListener('nasctl:unauthorized',expired); document.removeEventListener('visibilitychange',poll);};
   });
 </script>
-<svelte:window onresize={resize}/>
+
+{#snippet pages(list)}
+  {#each list as id (id)}{@const page = pageInfo(id)}
+    <Page {page} active={current === id}>
+      {#if id === 'home'}<Home {auth} {snapshot} {error} {adminPages} {readOnly} {canConfigure} onsearch={searchFiles}/>
+      {:else if id === 'files'}<Files {readOnly} agent={auth.principal === 'ai'} searchRequest={fileSearch}/>
+      {:else if id === 'album'}<Album {readOnly} {canConfigure} canManage={adminPages.some((item) => item.id === 'admin/album')}/>
+      {:else if id === 'anime'}<Anime {readOnly} viewer={role === 'viewer'} canManage={adminPages.some((item) => item.id === 'admin/anime')}/>
+      {:else if id === 'me'}<Me {auth} {theme} {adminPages} {displayName} pending={authPending} onthemechange={setTheme} onlogout={logout} onpassword={checkAuth}/>
+      {:else if id === 'admin'}<Overview {snapshot} {error} {loading} jobsAvailable={true} canConfigure={canConfigure && auth.principal !== 'ai'} onrefresh={refresh}/>
+      {:else if id === 'admin/jobs'}<Jobs/>
+      {:else if id === 'admin/anime'}<Anime {readOnly} admin/>
+      {:else if id === 'admin/album'}<AlbumAdmin {readOnly} {canConfigure}/>
+      {:else if id === 'admin/backup'}<Backup {readOnly}/>
+      {:else if id === 'admin/users'}<Users {auth} onaccountschange={checkAuth}/>
+      {:else if id === 'admin/system'}<System onchange={refresh}/>
+      {:else if id === 'admin/logs'}<Logs/>{/if}
+    </Page>
+  {/each}
+{/snippet}
+
+{#snippet account()}
+  <button class="theme-toggle icon-button" aria-label={theme === 'dark' || (theme === 'system' && matchMedia?.('(prefers-color-scheme: dark)')?.matches) ? '切换浅色模式' : '切换深色模式'} onclick={() => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark')}><Icon name="moon" size={18} class="theme-moon"/><Icon name="sun" size={18} class="theme-sun"/></button>
+  <a class="avatar" href="#me" aria-label={'我的账号：' + displayName} title={displayName}>{displayName.slice(0,1).toUpperCase()}</a>
+{/snippet}
+
 {#if !auth || authError}
   <main class="login-page"><section class="login-card panel"><h1>连接你的 NAS</h1>{#if authError}<p class="notice error" role="alert">{authError}</p><button class="button primary" disabled={authPending} onclick={checkAuth}>重新连接</button>{:else}<p role="status">正在检查访问状态…</p>{/if}</section></main>
 {:else if !auth.authenticated}
   <Login available={auth.login_available} accounts={auth.accounts_enabled} setup={auth.setup_required} tokenAvailable={auth.token_login_available} onlogin={checkAuth}/>
 {:else}
-<a class="skip-link" href="#content">跳至桌面</a>
-<div class="desktop-shell" class:mobile-photo={mobile && active === 'album'}>
-  <DesktopLandscape/>
-  <header class="topbar desktop-topbar"><button class="desktop-brand" aria-label="显示桌面" onclick={desktop}><span class="brand-symbol"><Icon name="disk" size={22}/></span><strong>nasctl</strong><span>我的空间</span></button><div class="topbar-actions"><span class="system-status"><span class="status-dot" class:offline={!snapshot || !['normal','maintenance'].includes(snapshot?.mode?.mode)}></span>{snapshot ? modeLabels[snapshot.mode?.mode] || '状态未知' : '正在连接'}</span><span class="topbar-divider"></span><button class="icon-button" aria-label={theme === 'light' ? '切换深色模式' : '切换浅色模式'} onclick={toggleTheme}><Icon name={theme === 'light' ? 'moon' : 'sun'} size={18}/></button>{#if auth.required}<button class="text-button" disabled={authPending} onclick={logout}>退出登录</button>{/if}{#if auth.user_id}<AccountPassword {auth} oncomplete={checkAuth}/>{:else}<span class="avatar" aria-label="本地操作者">N</span>{/if}</div></header>
-  <main id="content" class="desktop-workspace" tabindex="-1" aria-label="NAS 桌面">
-    <div class="desktop-home" inert={mobile && !!active}>
-      <aside class="desktop-status-column" aria-label="设备状态">
-        <section class="desktop-glass clock-widget"><time datetime={now.toISOString()}>{now.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false})}</time><span>{now.toLocaleDateString('zh-CN',{month:'long',day:'numeric',weekday:'long'})}</span></section>
-        <button class="desktop-glass system-widget" onclick={()=>open('overview')}><div class="desktop-widget-title"><Icon name="overview" size={16}/><strong>系统状态</strong><Icon name="chevron" size={14}/></div><div class="memory-widget"><span class="memory-ring" class:unknown={memoryPercent===null} style:--memory={(memoryPercent ?? 0)+'%'}><span>{memoryPercent===null?'—':memoryPercent+'%'}<small>内存已用</small></span></span><div><strong>{snapshot?.resources?bytes(snapshot.resources.mem_available_kb*1024):'未获取'}</strong><small>可用内存</small><span>{snapshot?.resources?'共 '+bytes(snapshot.resources.mem_total_kb*1024):'资源数据暂不可用'}</span></div></div><div class="desktop-guard"><span class="status-dot" class:offline={!snapshot?.resources}></span>{snapshot?.resources?.verdict ? snapshot.resources.verdict==='allow'?'资源保护 · 允许处理':'资源保护 · '+(snapshot.resources.reason||'限制处理'):'资源保护状态未获取'}</div></button>
-        <section class="desktop-glass storage-widget"><div class="desktop-widget-title"><Icon name="disk" size={16}/><strong>存储空间</strong><button class="icon-button" aria-label="查看存储目录" onclick={()=>open('files')}><Icon name="chevron" size={14}/></button></div>{#if roots.length}{#each roots.slice(0,4) as root}<button class="desktop-storage" onclick={()=>open('files')}><span class="desktop-storage-icon"><Icon name="disk" size={21}/></span><div><strong>{root.label || root.id}</strong><small>{!root.available?'暂不可用':root.capacity?bytes(root.capacity.available_bytes)+' 可用 / '+bytes(root.capacity.total_bytes):'容量暂不可用'}</small>{#if root.capacity}<progress class="capacity-meter desktop-capacity-meter" value={root.capacity.used_bytes} max={root.capacity.total_bytes} aria-label={(root.label||root.id)+' 文件系统空间使用率'}></progress>{/if}</div><span class="status-dot" class:offline={!root.available}></span></button>{/each}{:else}<p class="desktop-widget-empty">{snapshot?'尚未添加存储目录':'正在读取…'}</p>{/if}</section>
-        {#if auth.can_manage_device!==false}<button class="desktop-glass desktop-settings-link" onclick={()=>open('settings')}><Icon name="settings" size={17}/>设备设置<Icon name="chevron" size={14}/></button>{/if}
-      </aside>
-      <section class="desktop-app-column">
-        <form class="desktop-search desktop-glass" onsubmit={searchApps}><Icon name="search" size={18}/><input aria-label="搜索应用或文件" placeholder="搜索应用或文件…" bind:value={appQuery} maxlength="128"/><kbd>↵</kbd></form>
-        {#if appQuery.trim() && searchRoot}<button class="desktop-file-search desktop-glass" onclick={searchFiles}><Icon name="folder" size={18}/><span>在“{searchRoot.label || searchRoot.id}”中搜索 <strong>{appQuery}</strong></span><Icon name="chevron" size={16}/></button>{/if}
-        {#if auth.setup_requires_config&&auth.can_manage_device!==false}<div class="notice desktop-onboarding"><div><strong>启用账号登录</strong><p>先在本机配置持久登录保护，再为成员创建账号。</p></div><button class="button primary small" onclick={()=>open('settings')}>查看设置步骤</button></div>{:else if auth.setup_available&&!auth.accounts_enabled&&auth.can_manage_device!==false}<div class="notice desktop-onboarding"><div><strong>设置管理员账号</strong><p>使用用户名和密码登录你的 NAS，并为成员分配角色。</p></div><button class="button primary small" onclick={()=>open('settings')}>开始设置</button></div>{:else if snapshot&&roots.length===0&&auth.can_manage_device!==false}<div class="notice desktop-onboarding"><div><strong>添加你的存储目录</strong><p>选择 NAS 上已准备好的目录，开始浏览和管理文件。</p></div><button class="button primary small" onclick={()=>open('settings')}>添加目录</button></div>{/if}<div class="desktop-section-heading"><h1>应用</h1><span>你的私人空间</span></div>
-        <nav class="desktop-apps" aria-label="应用">{#each shownApps as item}<button class={'desktop-app nav-link '+item.color} onclick={()=>open(item.id)}><span class="app-icon"><Icon name={item.icon} size={29}/></span><strong>{item.label}</strong><small>{item.hint}</small></button>{/each}<DesktopApps onchange={items=>customApps=items} query={appQuery} canConfigure={auth.can_manage_device!==false && auth.principal!=='ai' && !readOnly}/></nav>
-        {#if !shownApps.length&&!shownCustomApps.length}<p class="desktop-no-results">没有匹配的应用{searchRoot?'，可在上方搜索文件。':'。'}</p>{/if}
-        {#if visibleApps.some(item=>item.id==='jobs')}<button class="desktop-glass desktop-task-summary" onclick={()=>open('jobs')}><span class="task-summary-icon"><Icon name="jobs" size={23}/></span><div><strong>任务动态</strong><span>{snapshot ? snapshot.running?.length ? snapshot.running.length+' 项任务正在进行' : '此刻没有任务运行' : '正在读取任务…'}</span></div>{#if snapshot?.attention?.length}<span class="desktop-attention">{snapshot.attention.length} 项需要留意</span>{:else}<span class="desktop-task-idle">{snapshot?'一切有序':'未获取'}</span>{/if}<Icon name="chevron" size={17}/></button>{/if}
-        {#if error}<p class="notice error" role="alert">设备状态读取失败：{error}</p>{/if}
-        <p class="desktop-tip">点击应用打开窗口 · 双击标题栏最大化 · 底部随时切换</p>
-      </section>
-    </div>
-    {#each windows as frame (frame.id)}{@const app=navigation.find((item)=>item.id===frame.id)}
-      <AppWindow {frame} {app} active={active===frame.id} {mobile} {areaWidth} {areaHeight} onfocus={()=>focus(frame.id)} onchange={(next)=>change(frame.id,next)} onclose={()=>close(frame.id)}>
-        {#if frame.id === 'media'}<Anime {readOnly} viewer={auth.role==='viewer'}/>
-        {:else if frame.id === 'overview'}<Overview {snapshot} {error} {loading} jobsAvailable={visibleApps.some(item=>item.id==='jobs')} onrefresh={refresh}/>
-        {:else if frame.id === 'files'}<Files {readOnly} agent={auth.principal === 'ai'} searchRequest={fileSearch}/>
-        {:else if frame.id === 'jobs'}<Jobs/>
-        {:else if frame.id === 'settings'}<Settings onchange={refresh} {auth} onaccountschange={checkAuth}/>
-        {:else if frame.id === 'album'}<Album {readOnly} ondesktop={desktop} canConfigure={auth.can_manage_device!==false}/>
-        {:else if frame.id === 'backup'}<Backup {readOnly}/>{/if}
-      </AppWindow>
-    {/each}
-  </main>
-  <footer class="desktop-dock-area"><nav class="desktop-dock" aria-label="窗口切换"><button class="dock-item" class:active={!active} aria-label="显示桌面" onclick={desktop}><Icon name="home" size={23}/><span>桌面</span></button>{#if windows.length}<span class="dock-divider"></span>{/if}{#each windows as frame (frame.id)}{@const app=navigation.find((item)=>item.id===frame.id)}<button class={'dock-item '+app.color} class:active={active===frame.id} class:minimized={frame.minimized} aria-label={'切换到'+app.label+(frame.minimized?'，已最小化':'')} aria-pressed={active===frame.id} onclick={()=>focus(frame.id)}><Icon name={app.icon} size={23}/><span>{app.label}</span><i></i></button>{/each}</nav><span class="desktop-version">私人存储 · nasctl</span></footer>
+<a class="skip-link" href="#content">跳至主要内容</a>
+<div class="shell" class:admin-shell={inAdmin} class:user-shell={!inAdmin} class:fill={pageInfo(current)?.fill}>
+  {#if inAdmin}
+    <aside class="admin-sidebar" class:open={drawer} aria-label="管理后台导航">
+      <div class="sidebar-brand"><span class="brand-mark"><Icon name="disk" size={18}/></span><strong>nasctl</strong><span class="sidebar-badge">管理后台</span></div>
+      <nav class="sidebar-nav">
+        {#each groups as {group, pages: items}}
+          {#if group}<p class="sidebar-group">{group}</p>{/if}
+          {#each items as page (page.id)}<a class="nav-link" class:active={current === page.id} aria-current={current === page.id ? 'page' : undefined} href={'#' + page.id}><Icon name={page.icon} size={18}/><span>{page.label}</span></a>{/each}
+        {/each}
+      </nav>
+      <a class="sidebar-exit" href="#home"><Icon name="back" size={17}/>返回我的空间</a>
+    </aside>
+    {#if drawer}<button class="drawer-scrim" aria-label="关闭导航" onclick={() => drawer = false}></button>{/if}
+    <header class="admin-topbar">
+      <button class="icon-button drawer-toggle" aria-label="打开管理导航" aria-expanded={drawer} onclick={() => drawer = !drawer}><Icon name="menu" size={20}/></button>
+      <p class="topbar-title"><a href={'#' + adminPages[0]?.id}>管理后台</a><Icon name="chevron" size={14}/><strong>{pageInfo(current)?.label}</strong></p>
+      <span class="system-status" title={snapshot?.mode?.reason || ''}><span class="status-dot" class:offline={!healthy}></span>{snapshot ? modeLabels[snapshot.mode?.mode] || '状态未知' : '正在连接'}</span>
+      {@render account()}
+    </header>
+  {:else}
+    <header class="app-header">
+      <a class="brand" href="#home" aria-label="nasctl 首页"><span class="brand-mark"><Icon name="disk" size={18}/></span><strong>nasctl</strong></a>
+      <nav class="primary-nav" aria-label="主导航">{#each userPages.filter((page) => !page.mobileOnly) as page (page.id)}<a class="nav-link" class:active={current === page.id} aria-current={current === page.id ? 'page' : undefined} href={'#' + page.id}><Icon name={page.icon} size={17}/><span>{page.label}</span></a>{/each}</nav>
+      <div class="header-actions">
+        {#if adminPages.length}<a class="admin-entry" href={'#' + adminPages[0].id}><Icon name="settings" size={16}/><span>管理后台</span></a>{/if}
+        {@render account()}
+      </div>
+    </header>
+  {/if}
+  <main id="content" class="shell-main" tabindex="-1">{@render pages(visited)}</main>
+  {#if !inAdmin}<nav class="tab-bar" aria-label="快捷导航">{#each userPages as page (page.id)}<a class:active={current === page.id} aria-current={current === page.id ? 'page' : undefined} href={'#' + page.id}><Icon name={page.icon} size={22}/><span>{page.label}</span></a>{/each}</nav>{/if}
 </div>
 {/if}

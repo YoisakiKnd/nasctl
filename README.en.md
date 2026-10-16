@@ -51,8 +51,8 @@ design follows from it:
 The native single-episode RSS → download → archive workflow and web UI are implemented.
 Auto-download and polling default to off. See [`docs/ANIME.md`](docs/ANIME.md) for
 configuration and current limits. AutoBangumi is the feature reference; no legacy
-IWantWatchAnime source or Telegram integration is required. The desktop and file
-manager follow the requested CasaOS/P2 layout. Linux amd64, arm64 and ARMv7 static
+IWantWatchAnime source or Telegram integration is required. The web UI is split into
+everyday user pages and an admin console (see docs/FRONTEND.md). Linux amd64, arm64 and ARMv7 static
 builds pass; Linux/arm64 full race tests, native systemd/cgroup album processing,
 protocol fixtures, compatible upgrade/rollback and browser video playback pass.
 

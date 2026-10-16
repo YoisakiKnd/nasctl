@@ -15,7 +15,7 @@ const input=(label,value)=>{const n=d.querySelector('input[aria-label="'+label+'
 try{
  w.eval(await(await fetch(base+'/app.js')).text());await wait(()=>d.querySelector('.nas-settings fieldset')&&!d.querySelector('.nas-settings fieldset').disabled,'settings resolves');
  check(!d.body.textContent.includes('fixture-initial-private'),'initial secrets not rendered');
- const cap=d.querySelector('.desktop-storage small')?.textContent||'';check(cap.includes('可用')&&!cap.includes('暂不可用'),'real filesystem capacity rendered');
+ w.location.hash='home';await wait(()=>d.querySelector('.storage-meter-list small'),'home storage card');const cap=d.querySelector('.storage-meter-list small')?.textContent||'';check(cap.includes('可用')&&!cap.includes('暂不可用'),'real filesystem capacity rendered');w.location.hash='settings';await wait(()=>d.querySelector('.page.active .nas-settings'),'back to system settings');
  input('上传上限（字节）','2048');
  button('校验配置').click();await wait(()=>d.querySelector('.nas-settings [role="status"]')?.textContent.includes('校验通过'),'validation feedback');
  check(!(await(await fetch(base+'/api/v1/settings')).json()).restart_required,'validation does not save');

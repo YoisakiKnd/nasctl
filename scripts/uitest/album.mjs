@@ -63,11 +63,10 @@ try{
   input('input[aria-label="搜索相册"]','');const kind=d.querySelector('select[aria-label="相册类型"]');kind.value='video';kind.dispatchEvent(new w.Event('change',{bubbles:true}));await apply();
   await wait(()=>tiles().length===1&&!d.querySelector('.loading-state'),'video filter');tiles()[0].click();await wait(()=>d.querySelector('dialog video'),'video uses native browser controls');check(d.querySelector('dialog video').getAttribute('src').endsWith('/raw'),'video streams through the authenticated proxy');close();
   button('全部照片').click();await wait(()=>tiles().length===48&&!d.querySelector('.loading-state'),'return to all photos');
-  w.innerWidth=390;w.innerHeight=844;w.dispatchEvent(new w.Event('resize'));await delay(0);
-  check(d.querySelector('.desktop-shell.mobile-photo')&&d.querySelector('.photo-app.mobile'),'phone layout uses a full-screen photo shell');
-  button('返回 NAS 桌面').click();await delay(0);check(!d.querySelector('.desktop-shell.mobile-photo')&&d.querySelector('.photo-app.window-hidden'),'return to NAS restores desktop navigation and minimizes album');
-  w.location.hash='album';await wait(()=>d.querySelector('.desktop-shell.mobile-photo'),'reopen minimized photo app');
-  w.innerWidth=1024;w.dispatchEvent(new w.Event('resize'));await delay(0);check(!d.querySelector('.desktop-shell.mobile-photo'),'desktop window layout returns after phone breakpoint');
+  w.location.hash='home';await wait(()=>d.querySelector('.page.active')?.dataset.page==='home','leave the album');
+  check(d.querySelector('.page[data-page="album"]').hidden&&tiles().length===48,'album stays mounted with its loaded page while hidden');
+  w.location.hash='album';await wait(()=>d.querySelector('.page.active')?.dataset.page==='album'&&d.querySelector('.shell.fill')&&!d.querySelector('.loading-state'),'album returns as a full-height page');
+  check(tiles().length===48&&d.querySelector('.tab-bar'),'returning keeps the gallery and the phone tab bar');
   const finalJobs=(await(await request('/api/v1/jobs?limit=200')).json()).jobs.map((job)=>job.id);check(JSON.stringify(initialJobs)===JSON.stringify(finalJobs),'album browsing creates no background jobs');
   check(errors.length===0,'no DOM errors: '+errors.join('; '));console.log('Integrated album flows passed through the read-only local album API. Codec playback is a separate check.');
 }finally{dom.window.close();}

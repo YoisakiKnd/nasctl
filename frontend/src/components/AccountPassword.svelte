@@ -1,14 +1,15 @@
 <script>
   import { api,json } from '../lib/api.js';
   import Dialog from './Dialog.svelte';
-  let { auth,oncomplete }=$props();
+  let { auth,oncomplete,variant='avatar' }=$props();
   let opened=$state(false),current=$state(''),password=$state(''),again=$state(''),pending=$state(false),error=$state(''),discard=$state(false);
   const valid=$derived(Array.from(password).length>=12&&new TextEncoder().encode(password).length<=1024&&password===again);
   function clear(){opened=false;current='';password='';again='';error='';discard=false;}
   function close(){if(pending)return;if(current||password||again){discard=true;return;}clear();}
   async function save(event){event.preventDefault();if(pending||!valid)return;pending=true;error='';try{await api('/api/v1/auth/password',json('POST',{current_password:current,password},{headers:{'X-Nasctl-Confirm':'1'}}));current='';password='';again='';opened=false;await oncomplete?.();}catch(e){error=e.message;}finally{pending=false;}}
 </script>
-<button class="avatar" aria-label="管理我的密码" title={(auth.display_name||auth.name)+' · 修改密码'} onclick={()=>{opened=true;discard=false;}}>{(auth.display_name||auth.name||'N').slice(0,1).toUpperCase()}</button>
+{#if variant==='button'}<button class="button secondary" onclick={()=>{opened=true;discard=false;}}>修改密码</button>
+{:else}<button class="avatar" aria-label="管理我的密码" title={(auth.display_name||auth.name)+' · 修改密码'} onclick={()=>{opened=true;discard=false;}}>{(auth.display_name||auth.name||'N').slice(0,1).toUpperCase()}</button>{/if}
 {#if opened}<Dialog title="修改我的密码" onclose={close}>
   <p class="muted">{auth.display_name||auth.name} · {auth.name}。保存后，该账号的所有会话都需要重新登录。</p>
   <form onsubmit={save}><fieldset class="account-fields" disabled={pending}>
