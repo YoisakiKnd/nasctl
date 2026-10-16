@@ -6,11 +6,11 @@ const dom=new JSDOM(await(await request('/')).text(),{url:base+'/#media',runScri
 const w=dom.window,d=w.document,delay=(ms)=>new Promise((resolve)=>setTimeout(resolve,ms));
 const check=(ok,label)=>{if(!ok)throw new Error(label);console.log('ok:',label);};
 async function wait(test,label){const until=Date.now()+8000;while(Date.now()<until){if(test())return;await delay(25);}throw new Error('timed out: '+label);}
-const button=(label,scope=d)=>[...scope.querySelectorAll('button')].find((node)=>node.textContent.trim()===label);
+const button=(label,scope=d)=>[...scope.querySelectorAll('button')].find((node)=>node.getAttribute('aria-label')===label||node.textContent.trim()===label);
 w.fetch=request;w.AbortController=AbortController;w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
 w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
 try{
- w.eval(await(await request('/app.js')).text());await wait(()=>button('剧集与媒体库'),'anime app loaded');button('剧集与媒体库').click();
+ w.eval(await(await request('/app.js')).text());await wait(()=>button('剧集与媒体库'),'anime app loaded');button('管理追番').click();await delay(0);button('剧集与媒体库').click();
  await wait(()=>button('暂停下载'),'episode control visible');
  const before=await(await fetch(fixture+'/__test/stats')).json();
  for(const [label,state] of [['暂停下载','下载已暂停'],['恢复下载','下载中'],['重新校验','校验中']]){

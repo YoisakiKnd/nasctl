@@ -5,13 +5,13 @@ const dom=new JSDOM(await(await request('/')).text(),{url:base+'/#media',runScri
 const w=dom.window,d=w.document,delay=(ms)=>new Promise((resolve)=>setTimeout(resolve,ms));
 const check=(ok,label)=>{if(!ok)throw new Error(label);console.log('ok:',label);};
 async function wait(test,label){const until=Date.now()+10000;while(Date.now()<until){if(test())return;await delay(25);}throw new Error('timed out: '+label);}
-const button=(label,scope=d)=>[...scope.querySelectorAll('button')].find((node)=>node.textContent.trim()===label);
+const button=(label,scope=d)=>[...scope.querySelectorAll('button')].find((node)=>node.getAttribute('aria-label')===label||node.textContent.trim()===label);
 w.fetch=request;w.AbortController=AbortController;w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
 w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
 const download=(path)=>request('/api/v1/files/download?'+new URLSearchParams({root:'library',path:path.replace(/^\//,'')}));
 try{
  w.eval(await(await request('/app.js')).text());await wait(()=>[...d.querySelectorAll('.subscription-card')].some((node)=>node.textContent.includes('Generated Metadata Fixture')),'generated subscription');
- const card=[...d.querySelectorAll('.subscription-card')].find((node)=>node.textContent.includes('Generated Metadata Fixture'));button('更新元数据',card).click();await wait(()=>d.querySelector('dialog'),'metadata options');
+ button('管理追番').click();await delay(0);const card=[...d.querySelectorAll('.subscription-card')].find((node)=>node.textContent.includes('Generated Metadata Fixture'));button('更新元数据',card).click();await wait(()=>d.querySelector('dialog'),'metadata options');
  const limit=d.querySelector('[aria-label="元数据处理限额"]');limit.value='1';limit.dispatchEvent(new w.Event('input',{bubbles:true}));
  [...d.querySelectorAll('dialog label')].find((node)=>node.textContent.includes('替换已有 NFO')).querySelector('input').click();await delay(0);button('确认更新元数据',d.querySelector('dialog')).click();
  await wait(()=>button('继续下一批元数据')&&!button('继续下一批元数据').disabled,'first bounded metadata batch completed');
