@@ -6,6 +6,7 @@
   import Icon from '../components/Icon.svelte';
   import PhotoViewer from '../components/PhotoViewer.svelte';
   import PhotoVault from '../components/PhotoVault.svelte';
+  import { vault } from '../lib/vault.svelte.js';
   let { readOnly = true, canConfigure = true, canManage = false } = $props();
   let status = $state(null), collections = $state([]), listing = $state(null), loading = $state(true), error = $state('');
   let collection = $state(''), search = $state(''), kind = $state(''), from = $state(''), to = $state(''), sort = $state('time_desc'), missing = $state(false), fallback = $state(false), gps = $state(false);
@@ -28,6 +29,7 @@
     }
     return result;
   });
+  $effect(() => {if (vault.open) {vault.open = false; view = 'vault'; selected = null; menuOpen = false;}});
   function browse(nextView, nextCollection = '') {
     view = nextView; collection = nextCollection; kind = nextView === 'videos' ? 'video' : '';
     menuOpen = false; filtersOpen = false; searchOpen = false; search = ''; from = ''; to = ''; missing = false; fallback = false; gps = false;
@@ -78,7 +80,7 @@
       {#if view === 'photos' || view === 'videos'}<button aria-expanded={filtersOpen} onclick={() => {menuOpen = false; searchOpen = true; filtersOpen = !filtersOpen;}}><Icon name="sliders" size={18}/><span>筛选</span></button>{/if}
     </div>{/if}
   </header>
-  {#if view === 'vault'}<PhotoVault {readOnly} candidate={moveCandidate} oncancel={() => moveCandidate = null} onmoved={() => {moveCandidate = null; load({reset:true});}}/>{:else}
+  {#if view === 'vault'}<PhotoVault {readOnly} {canManage} candidate={moveCandidate} oncancel={() => moveCandidate = null} onmoved={() => {moveCandidate = null; load({reset:true});}}/>{:else}
   <div class="photo-library">
     {#if error}<ErrorNotice message={error} onretry={() => load()}/>{/if}
     {#if loading && !status}<p class="loading-state" role="status">正在读取照片…</p>

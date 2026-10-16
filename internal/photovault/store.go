@@ -413,6 +413,18 @@ func (s *Store) key(token, owner string) ([]byte, error) {
 	return bytes.Clone(v.key), nil
 }
 func (s *Store) Valid(token, owner string) bool { return s.Status(token, owner).Unlocked }
+
+// Extend keeps a session open while it is in use: every use moves the
+// automatic lock a full lifetime ahead, so a long video does not lock midway.
+func (s *Store) Extend(token, owner string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.session(token, owner)
+	if ok {
+		v.expires = time.Now().Add(lifetime)
+	}
+	return ok
+}
 func (s *Store) Protected(id int64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

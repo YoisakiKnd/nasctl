@@ -72,7 +72,7 @@ func TestVaultHTTPPasswordCookieCSRFRoleAndRateBounds(t *testing.T) {
 			cookie = c
 		}
 	}
-	if cookie == nil || !cookie.HttpOnly || cookie.Path != "/api/v1/album/vault" || cookie.SameSite != http.SameSiteStrictMode || cookie.MaxAge != 900 {
+	if cookie == nil || !cookie.HttpOnly || cookie.Path != "/api/v1" || cookie.SameSite != http.SameSiteStrictMode || cookie.MaxAge != 0 {
 		t.Fatal("cookie protections", cookie)
 	}
 	if code, body, _ := request("GET", "/api/v1/album/vault/media", "", false, nil); code != 200 || strings.Contains(body, "password") {

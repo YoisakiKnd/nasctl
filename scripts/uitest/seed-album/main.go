@@ -62,6 +62,11 @@ func main() {
 		must(os.MkdirAll(filepath.Join(abs, dir), 0750))
 	}
 	must(os.MkdirAll(filepath.Join(abs, "library", "Additional"), 0750))
+	// A second location whose "Private" folder the UI marks as private.
+	// Its rows are indexed ahead of time under the code the test will use.
+	extra := filepath.Join(abs, "extra")
+	must(os.MkdirAll(filepath.Join(extra, "Private"), 0750))
+	must(os.WriteFile(filepath.Join(extra, "Public-note.txt"), []byte("generated public note\n"), 0640))
 	must(os.WriteFile(marker, []byte("nasctl-album-fixture-v1\n"), 0600))
 	albumDoc := fmt.Sprintf("[paths]\nstate_dir=%q\ncache_dir=%q\n[[collections]]\ncode=\"photos\"\nname=\"Fixture Photos\"\nroot=%q\nenabled=true\nallow_shared_volume=true\n", filepath.Join(abs, "album-state"), filepath.Join(abs, "cache"), filepath.Join(abs, "library"))
 	must(os.WriteFile(filepath.Join(abs, "album.toml"), []byte(albumDoc), 0600))
@@ -69,7 +74,7 @@ func main() {
 	must(err)
 	// The console reads the same index/cache in process, and re-executes
 	// itself as `nasctl album` for explicit processing.
-	nativeDoc := fmt.Sprintf("[server]\nbind=\"127.0.0.1:%d\"\n[paths]\nstate_dir=%q\ncache_dir=%q\n[[collections]]\ncode=\"photos\"\nname=\"Fixture Photos\"\nroot=%q\nenabled=true\nallow_shared_volume=true\n[[hub.storage]]\nid=\"photos\"\nlabel=\"Fixture Photos\"\npath=%q\nwritable=%t\n[hub.album]\nmode=\"local\"\n", *hubPort, filepath.Join(abs, "album-state"), filepath.Join(abs, "cache"), filepath.Join(abs, "library"), filepath.Join(abs, "library"), *writable)
+	nativeDoc := fmt.Sprintf("[server]\nbind=\"127.0.0.1:%d\"\n[paths]\nstate_dir=%q\ncache_dir=%q\n[[collections]]\ncode=\"photos\"\nname=\"Fixture Photos\"\nroot=%q\nenabled=true\nallow_shared_volume=true\n[[hub.storage]]\nid=\"photos\"\nlabel=\"Fixture Photos\"\npath=%q\nwritable=%t\n[[hub.storage]]\nid=\"extra\"\nlabel=\"Extra Space\"\npath=%q\nwritable=%t\n[hub.album]\nmode=\"local\"\n", *hubPort, filepath.Join(abs, "album-state"), filepath.Join(abs, "cache"), filepath.Join(abs, "library"), filepath.Join(abs, "library"), *writable, extra, *writable)
 	must(os.WriteFile(filepath.Join(abs, "native.toml"), []byte(nativeDoc), 0600))
 	st, err := store.Open(cfg.Paths.IndexFile, store.Options{})
 	must(err)
@@ -124,6 +129,27 @@ func main() {
 	must(err)
 	must(st.RefreshMediaCount(ctx, id))
 	must(st.SetLastScan(ctx, id, time.Now().Unix()))
+	secretRoot := filepath.Join(extra, "Private")
+	secret, err := st.UpsertCollection(ctx, "secret", "Generated Private", secretRoot, "", true, false)
+	must(err)
+	for i := 0; i < 3; i++ {
+		name := fmt.Sprintf("Private-%d.jpg", i)
+		body := picture(100+i, 640, 420)
+		p := filepath.Join(secretRoot, name)
+		stamp := time.Date(2026, 9, 1+i, 12, 0, 0, 0, time.UTC).Unix()
+		must(os.WriteFile(p, body, 0640))
+		must(os.Chtimes(p, time.Unix(stamp, 0), time.Unix(stamp, 0)))
+		up, err := st.UpsertMedia(ctx, store.MediaScan{CollectionID: secret, CollectionCode: "secret", RelPath: name, BaseName: name, Ext: "jpg", Size: int64(len(body)), MtimeNS: stamp * 1e9, Kind: "image", MIME: "image/jpeg", At: stamp, RunToken: 1})
+		must(err)
+		must(st.SetProbe(ctx, store.ProbeUpdate{ID: up.ID, State: store.ProbeOK, Kind: "image", MIME: "image/jpeg", Format: "jpg", Width: 640, Height: 420, Pixels: 640 * 420, TakenAt: &stamp, TakenSrc: store.TakenSrcExif, Orientation: 1, ThumbState: store.ThumbPending, At: stamp}))
+		thumb := picture(100+i, cfg.Decode.ThumbMaxEdge, cfg.Decode.ThumbMaxEdge*420/640)
+		tp, err := cachepath.Path(cfg.Paths.CacheDir, cachepath.Key("secret", name), cfg.Decode.ThumbMaxEdge, cfg.Cache.ShardDepth)
+		must(err)
+		must(os.MkdirAll(filepath.Dir(tp), 0750))
+		must(os.WriteFile(tp, thumb, 0640))
+		must(st.SetThumb(ctx, store.ThumbUpdate{ID: up.ID, State: store.ThumbOK, Bytes: int64(len(thumb)), At: stamp}))
+	}
+	must(st.RefreshMediaCount(ctx, secret))
 	health := source.Verify(cfg.Collections[0], cfg.Paths.StateDir, "")
 	if !health.OK {
 		panic(health.Fatal)

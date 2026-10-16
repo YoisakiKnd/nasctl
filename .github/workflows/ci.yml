@@ -386,6 +386,7 @@ jobs:
           node scripts/uitest/album.mjs http://127.0.0.1:18099
           node scripts/uitest/album-native.mjs http://127.0.0.1:18099
           node scripts/uitest/photo-vault.mjs http://127.0.0.1:18099 /tmp/nasctl-ci-native-album
+          node scripts/uitest/private-folders.mjs http://127.0.0.1:18099 /tmp/nasctl-ci-native-album
 
       - name: Single-download controls, metadata versions and bounded history cleanup
         run: |

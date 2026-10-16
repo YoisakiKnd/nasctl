@@ -242,7 +242,7 @@ func Declarations() []operations.Operation {
 			ID: "album.configure", Summary: "Configure local album directories without modifying originals",
 			Scope: []string{"album"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall,
 			Timeout: 10 * time.Second, Idempotent: true, Mutex: operations.MutexAlbum,
-			Params: []operations.Param{{Name: "code", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "root", Kind: operations.ParamString, MaxLen: 64}, {Name: "path", Kind: operations.ParamString, MaxLen: 4096}, {Name: "name", Kind: operations.ParamString, MaxLen: 128}, {Name: "enabled", Kind: operations.ParamBool}, {Name: "allow_shared_volume", Kind: operations.ParamBool}, {Name: "remove", Kind: operations.ParamBool}},
+			Params: []operations.Param{{Name: "code", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "root", Kind: operations.ParamString, MaxLen: 64}, {Name: "path", Kind: operations.ParamString, MaxLen: 4096}, {Name: "name", Kind: operations.ParamString, MaxLen: 128}, {Name: "enabled", Kind: operations.ParamBool}, {Name: "allow_shared_volume", Kind: operations.ParamBool}, {Name: "private", Kind: operations.ParamBool}, {Name: "remove", Kind: operations.ParamBool}},
 		},
 		{
 			ID: "album.scan", Summary: "Bounded directory and metadata scan",

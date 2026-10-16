@@ -1012,3 +1012,21 @@ func TestTheDefaultConfigurationHasNoAgents(t *testing.T) {
 		t.Error("the shipped default configures an agent; it must configure none")
 	}
 }
+
+func TestPrivateCollectionMayNotOverlapAnOrdinaryOne(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Default()
+	cfg.Paths.StateDir = filepath.Join(dir, "state")
+	cfg.Paths.CacheDir = filepath.Join(dir, "cache")
+	cfg.Collections = []Collection{
+		{Code: "photos", Root: filepath.Join(dir, "data", "photos"), Enabled: true},
+		{Code: "secret", Root: filepath.Join(dir, "data", "photos", "secret"), Enabled: true, Private: true},
+	}
+	if err := cfg.Finalize(); err == nil || !strings.Contains(err.Error(), "only one of them is private") {
+		t.Fatal("overlap accepted:", err)
+	}
+	cfg.Collections[1].Root = filepath.Join(dir, "data", "secret")
+	if err := cfg.Finalize(); err != nil {
+		t.Fatal(err)
+	}
+}

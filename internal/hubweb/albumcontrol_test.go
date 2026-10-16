@@ -29,6 +29,7 @@ func (f *albumControlFake) Configure(context.Context, album.Directory) error {
 	return nil
 }
 func (f *albumControlFake) RemoveDirectory(context.Context, string) error { return nil }
+func (f *albumControlFake) PrivateFolders() []album.Folder                { return nil }
 func (f *albumControlFake) Run(ctx context.Context, w album.Work, report func(album.WorkProgress)) (album.WorkResult, error) {
 	if report != nil {
 		report(album.WorkProgress{Processed: 2, Total: 3, Detail: "fixture progress"})

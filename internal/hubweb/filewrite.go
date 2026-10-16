@@ -156,6 +156,25 @@ func (s *Server) handleFileMutation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	op := "files." + strings.TrimPrefix(r.URL.Path, "/api/v1/files/")
+	gate := s.privateGate(r)
+	var refused error
+	switch op {
+	case "files.mkdir":
+		refused = gate.check(input.Root, input.Path, useInside)
+	case "files.rename":
+		if refused = gate.check(input.Root, input.From, useMove); refused == nil {
+			refused = gate.check(input.Root, input.To, useInside)
+		}
+	case "files.trash":
+		refused = gate.check(input.Root, input.Path, useMove)
+	case "files.restore":
+		if refused = gate.trashID(input.Root, input.ID); refused == nil && input.To != "" {
+			refused = gate.check(input.Root, input.To, useInside)
+		}
+	}
+	if privateError(w, refused) {
+		return
+	}
 	args := operations.NewArgs().Str("root", input.Root)
 	var action func(context.Context) (any, error)
 	switch op {
@@ -191,11 +210,22 @@ func (s *Server) handleFileTrashList(w http.ResponseWriter, r *http.Request) {
 	if !s.fileOperator(w, r, false) {
 		return
 	}
-	result, err := s.Files.ListTrash(r.URL.Query().Get("root"), intParam(r, "page", 1), intParam(r, "page_size", 50))
+	root := r.URL.Query().Get("root")
+	result, err := s.Files.ListTrash(root, intParam(r, "page", 1), intParam(r, "page_size", 50))
 	if err != nil {
 		s.fileWriteError(w, err)
 		return
 	}
+	gate := s.privateGate(r)
+	items := result.Items[:0]
+	for _, item := range result.Items {
+		if gate.trashItem(root, item) == nil {
+			items = append(items, item)
+		} else {
+			result.Total--
+		}
+	}
+	result.Items = items
 	writeJSON(w, 200, result)
 }
 
@@ -222,6 +252,9 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { <-s.streamSlots }()
 	root, p := r.URL.Query().Get("root"), r.URL.Query().Get("path")
+	if privateError(w, s.privateGate(r).check(root, p, useInside)) {
+		return
+	}
 	if r.ContentLength > s.Files.Limits().UploadMaxBytes {
 		s.fileWriteError(w, files.ErrTooLarge)
 		return

@@ -14,7 +14,17 @@ type Directory struct {
 	Path              string `json:"path"`
 	Enabled           bool   `json:"enabled"`
 	AllowSharedVolume bool   `json:"allow_shared_volume"`
-	Managed           bool   `json:"managed"`
+	// Private is omitted when false so that a catalog without private
+	// directories still loads in releases that predate the field.
+	Private bool `json:"private,omitempty"`
+	Managed bool `json:"managed"`
+}
+
+// Folder is a private album directory as a storage location: Path is
+// relative to the storage root, and "" means the whole root.
+type Folder struct {
+	Root string `json:"root"`
+	Path string `json:"path"`
 }
 type Configuration struct {
 	Directories     []Directory `json:"directories"`
@@ -45,6 +55,7 @@ type Control interface {
 	Configuration() Configuration
 	Configure(context.Context, Directory) error
 	RemoveDirectory(context.Context, string) error
+	PrivateFolders() []Folder
 	Run(context.Context, Work, func(WorkProgress)) (WorkResult, error)
 }
 

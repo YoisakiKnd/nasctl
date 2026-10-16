@@ -184,6 +184,10 @@ type Collection struct {
 	DataMount      string `toml:"data_mount"`
 	Enabled        bool   `toml:"enabled"`
 	FollowSymlinks bool   `toml:"follow_symlinks"`
+	// Private keeps the directory's photos and videos out of the ordinary
+	// album and file browser. They stay where they are and open only after
+	// the vault password is entered.
+	Private bool `toml:"private"`
 	// ExpectFSID pins the filesystem identity recorded on the first successful
 	// check. Empty means "record it now"; a mismatch refuses to run.
 	ExpectFSID string `toml:"expect_fsid"`
@@ -715,6 +719,16 @@ func (c *Config) Finalize() error {
 			if pathContains(reserved, col.Root) {
 				fail("application state directory %q is inside collections[%d].root %q; "+
 					"index and cache writes must never land in a media tree", reserved, i, col.Root)
+			}
+		}
+	}
+
+	// A private directory hides its files only if no ordinary directory also
+	// indexes them, so the two may not overlap in either direction.
+	for i, a := range c.Collections {
+		for _, b := range c.Collections[i+1:] {
+			if a.Private != b.Private && (pathContains(a.Root, b.Root) || pathContains(b.Root, a.Root)) {
+				fail("collections %q and %q overlap, but only one of them is private", a.Code, b.Code)
 			}
 		}
 	}

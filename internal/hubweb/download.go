@@ -58,6 +58,9 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if privateError(w, s.privateGate(r).check(root, path, useInside)) {
+		return
+	}
 	f, fi, err := s.Files.Open(root, path)
 	if err != nil {
 		status, code := mapFileErr(err)
@@ -208,6 +211,9 @@ func (s *Server) handleFolderDownload(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.Header().Set("Retry-After", "2")
 		writeError(w, http.StatusServiceUnavailable, "busy", "同时进行的下载太多，请稍后再试")
+		return
+	}
+	if privateError(w, s.privateGate(r).check(root, path, useCopy)) {
 		return
 	}
 	limits := s.Files.Limits()

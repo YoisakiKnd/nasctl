@@ -162,7 +162,7 @@ func (s *Server) parseListQuery(r *http.Request) (store.Filter, store.Cursor, in
 		return f, cur, 0, err
 	}
 	for _, col := range configured {
-		if _, ok := s.Cfg.Collection(col.Code); ok {
+		if s.inScope(r, col.Code) {
 			f.CollectionIDs = append(f.CollectionIDs, col.ID)
 		}
 	}
@@ -186,11 +186,9 @@ func (s *Server) parseListQuery(r *http.Request) (store.Filter, store.Cursor, in
 	f.Sort = sortMode
 
 	if code := q.Get("collection"); code != "" {
-		col, ok := s.Cfg.Collection(code)
-		if !ok {
+		if !s.inScope(r, code) {
 			return f, cur, 0, fmt.Errorf("unknown collection %q", code)
 		}
-		_ = col
 		cols, cerr := s.Store.Collections(r.Context())
 		if cerr != nil {
 			return f, cur, 0, cerr
@@ -322,8 +320,8 @@ func (s *Server) handleMediaList(w http.ResponseWriter, r *http.Request) {
 // estimate returns a cached count for the filter. It is bounded work: a count
 // over an indexed predicate, memoised for a few seconds.
 func (s *Server) estimate(ctx context.Context, f store.Filter) int64 {
-	key := fmt.Sprintf("%d|%s|%s|%v|%v|%v|%v|%v|%v",
-		f.CollectionID, strings.Join(f.Kinds, ","), f.Query,
+	key := fmt.Sprintf("%d|%v|%s|%s|%v|%v|%v|%v|%v|%v",
+		f.CollectionID, f.CollectionIDs, strings.Join(f.Kinds, ","), f.Query,
 		f.From, f.To, f.OnlyGPS, f.OnlyFallback, f.IncludeMissing, f.Sort)
 	if v, ok := s.counts.get(key); ok {
 		return v
@@ -347,7 +345,7 @@ func (s *Server) handleMediaItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m, err := s.Store.GetMedia(ctx, id)
-	_, configured := s.Cfg.Collection(m.CollectionCode)
+	configured := s.inScope(r, m.CollectionCode)
 	if errors.Is(err, store.ErrNotFound) || (err == nil && !configured) {
 		writeError(w, http.StatusNotFound, "not_found", "no media with that id")
 		return
@@ -426,6 +424,15 @@ func truncateRunes(s string, n int) string {
 	return string(r) + "…"
 }
 
+// inScope reports whether a directory is configured and belongs to the scope
+// the request asked for. Private directories answer only "scope=private",
+// which the console sends for a session that has unlocked the vault; every
+// other request sees them as absent.
+func (s *Server) inScope(r *http.Request, code string) bool {
+	col, ok := s.Cfg.Collection(code)
+	return ok && col.Private == (r.URL.Query().Get("scope") == "private")
+}
+
 func truthy(v string) bool { return v == "1" || v == "true" || v == "yes" }
 
 // pathID parses the media id out of the path. The form accepted is narrow on
@@ -473,7 +480,7 @@ func (s *Server) handleThumb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m, err := s.Store.GetMedia(ctx, id)
-	_, configured := s.Cfg.Collection(m.CollectionCode)
+	configured := s.inScope(r, m.CollectionCode)
 	if errors.Is(err, store.ErrNotFound) || (err == nil && !configured) {
 		writeError(w, http.StatusNotFound, "not_found", "no media with that id")
 		return
@@ -554,7 +561,7 @@ func (s *Server) handleStream(attachment bool) http.HandlerFunc {
 		}
 
 		m, err := s.Store.GetMedia(ctx, id)
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, store.ErrNotFound) || (err == nil && !s.inScope(r, m.CollectionCode)) {
 			writeError(w, http.StatusNotFound, "not_found", "no media with that id")
 			return
 		}

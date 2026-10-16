@@ -140,6 +140,17 @@ func (s *Server) handleFileBackground(w http.ResponseWriter, r *http.Request) {
 			s.fileWriteError(w, files.ErrReadOnly)
 			return
 		}
+		gate, use := s.privateGate(r), useCopy
+		if options.Move {
+			use = useMove
+		}
+		refused := gate.check(input.Root, options.From, use)
+		if refused == nil {
+			refused = gate.check(input.ToRoot, options.To, useInside)
+		}
+		if privateError(w, refused) {
+			return
+		}
 		if _, err = s.Files.Stat(input.Root, options.From); err != nil {
 			s.fileWriteError(w, err)
 			return
@@ -165,6 +176,9 @@ func (s *Server) handleFileBackground(w http.ResponseWriter, r *http.Request) {
 	} else if op == "files.purge" {
 		if input.Limit < 1 || input.Limit > s.Files.Limits().CopyMaxEntries || input.ConfirmName == "" {
 			s.fileWriteError(w, files.ErrConfirmation)
+			return
+		}
+		if privateError(w, s.privateGate(r).trashID(input.Root, input.ID)) {
 			return
 		}
 		args.Str("id", input.ID).Str("confirm_name", input.ConfirmName).Int("limit", int64(input.Limit))

@@ -2,6 +2,7 @@
   import ErrorNotice from './ErrorNotice.svelte';
   import { onMount, untrack } from 'svelte';
   import { api } from '../lib/api.js';
+  import { vaultLockedResponse } from '../lib/vault.svelte.js';
   import { bytes, duration } from '../lib/format.js';
   import Icon from './Icon.svelte';
   import Dialog from './Dialog.svelte';
@@ -12,7 +13,9 @@
   const selectedIndex = $derived(items.findIndex((item) => item.id === selected.id));
   const timeLabels = {exif:'拍摄时间',container:'视频记录时间',filename:'文件名中的时间',filetime:'文件修改时间',none:'时间未记录'};
   function capture(value) {return value ? value.replace('T',' ').slice(0,19) : '时间未记录';}
-  function mediaURL(item,part) {return '/api/v1/album/' + (selected.vault ? 'vault/' : '') + 'media/' + item.id + '/' + part;}
+  // Encrypted vault photos and private-directory media have their own gated routes.
+  const scope = (item) => item.vault ? 'vault/' : item.private ? 'private/' : '';
+  function mediaURL(item,part) {return '/api/v1/album/' + scope(selected) + 'media/' + item.id + '/' + part;}
   function navigate(offset) {const item = items[selectedIndex + offset]; if (item) onselect(item);}
   function touchDown(event) {touchStart = {id:event.pointerId,x:event.clientX,y:event.clientY}; swiped = false; event.currentTarget.setPointerCapture?.(event.pointerId);}
   function touchUp(event) {
@@ -27,15 +30,15 @@
   }
   async function load(item) {
     const current = ++generation; request?.abort(); request = new AbortController(); detail = null; detailError = ''; original = true; imageError = ''; showInfo = false;
-    try {const result = await api('/api/v1/album/' + (item.vault ? 'vault/' : '') + 'media/' + item.id,{signal:request.signal}); if (!disposed && generation === current) detail = result;}
-    catch (error) {if (disposed || generation !== current || error.name === 'AbortError') return; if (item.vault && error.code === 'vault_locked') window.dispatchEvent(new CustomEvent('nasctl:vault-locked')); else detailError = error.message;}
+    try {const result = await api('/api/v1/album/' + scope(item) + 'media/' + item.id,{signal:request.signal}); if (!disposed && generation === current) detail = result;}
+    catch (error) {if (disposed || generation !== current || error.name === 'AbortError') return; if (!vaultLockedResponse(error)) detailError = error.message;}
   }
   $effect(() => {const item = selected; untrack(() => load(item));});
   onMount(() => () => {disposed = true; request?.abort();});
 </script>
 <Dialog title={selected.name} photo {chromeHidden} onclose={onclose} onkey={photoKeys}>
-  <div class="photo-viewer-date" inert={chromeHidden}><strong>{capture(selected.taken_at).slice(0,10)}</strong><span>{selected.vault ? '保险箱' : collectionName(selected.collection)}</span></div>
-  <div class="photo-lightbox-tools" inert={chromeHidden}><span>{selectedIndex + 1} / {items.length}</span><div>{#if onmove && !selected.vault && detail?.item.kind === 'image' && !detail.item.missing}<button class="icon-button" aria-label="移入保险箱" title="移入保险箱" onclick={() => onmove(selected)}><Icon name="lock" size={19}/></button>{/if}<button class="icon-button" class:chosen={showInfo} aria-label="照片信息" aria-expanded={showInfo} onclick={() => showInfo = !showInfo}><Icon name="info" size={20}/></button>{#if detail && !detail.item.missing}<a class="icon-button" aria-label="下载原文件" title="下载原文件" href={mediaURL(detail.item,'download')} download={detail.item.name}><Icon name="download" size={20}/></a>{/if}</div></div>
+  <div class="photo-viewer-date" inert={chromeHidden}><strong>{capture(selected.taken_at).slice(0,10)}</strong><span>{selected.vault ? '保险箱' : (selected.private ? '私密 · ' : '') + collectionName(selected.collection)}</span></div>
+  <div class="photo-lightbox-tools" inert={chromeHidden}><span>{selectedIndex + 1} / {items.length}</span><div>{#if onmove && !selected.vault && !selected.private && detail?.item.kind === 'image' && !detail.item.missing}<button class="icon-button" aria-label="移入保险箱" title="移入保险箱" onclick={() => onmove(selected)}><Icon name="lock" size={19}/></button>{/if}<button class="icon-button" class:chosen={showInfo} aria-label="照片信息" aria-expanded={showInfo} onclick={() => showInfo = !showInfo}><Icon name="info" size={20}/></button>{#if detail && !detail.item.missing}<a class="icon-button" aria-label="下载原文件" title="下载原文件" href={mediaURL(detail.item,'download')} download={detail.item.name}><Icon name="download" size={20}/></a>{/if}</div></div>
   {#if detailError}<ErrorNotice message={detailError}/>{:else if !detail}<p class="loading-state" role="status">正在打开照片…</p>{:else}
     <div class="album-detail" class:with-info={showInfo}>
       <div class="photo-stage">

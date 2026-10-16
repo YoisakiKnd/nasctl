@@ -209,7 +209,7 @@ func ValidateAlbumDirectories(cfg *config.Config, rows []album.Directory) error 
 		if e != nil {
 			return e
 		}
-		copyConfig.Collections = append(copyConfig.Collections, config.Collection{Code: row.Code, Name: row.Name, Root: p, Enabled: row.Enabled, AllowSharedVolume: row.AllowSharedVolume})
+		copyConfig.Collections = append(copyConfig.Collections, config.Collection{Code: row.Code, Name: row.Name, Root: p, Enabled: row.Enabled, AllowSharedVolume: row.AllowSharedVolume, Private: row.Private})
 	}
 	return copyConfig.Finalize()
 }

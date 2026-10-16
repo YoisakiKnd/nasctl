@@ -487,8 +487,7 @@ HTML shell, so a client cannot mistake a missing endpoint for a working one.
 
 ## Native album browser
 
-The authenticated `/api/v1/album` reader defaults to the in-process local index;
-an explicitly configured remote service remains supported. It offers status (with
+The authenticated `/api/v1/album` reader reads the in-process local index. It offers status (with
 mode/index_ready), collections, bounded cursor listings,
 media details, cached thumbnails and original-file Range/HEAD/attachment streams.
 Configuration, query parameters, credentials and transfer limits: [ALBUM.md](ALBUM.md).
@@ -500,3 +499,23 @@ Write requests require `X-Nasctl-Confirm: 1`; scan/thumbs require collection,
 limit (1–10000), and max_runtime (1s–2h). Tasks return job_id and use the shared
 job monitor/cancel endpoints. Worker/AI/read-only constraints and configuration
 fields are documented in [ALBUM.md](ALBUM.md).
+
+### Private directories
+
+An album directory with `"private": true` is left where it is and hidden until
+the vault is unlocked. The ordinary routes behave as if it did not exist; its
+media is served only under `/api/v1/album/private/` (`collections`, `media`,
+`media/{id}`, `media/{id}/{thumb|raw|download}`), which answer a device manager
+whose browser carries an unlocked vault cookie (`nasctl_photo_vault`, path
+`/api/v1`). Every private read moves the 15-minute idle lock forward.
+
+The file API applies the same rule to the storage location of each private
+directory, judging both the requested path and the path it resolves to through
+links. While locked, listings, searches and the trash leave the directory out,
+and requests that name a path inside it return `403 vault_locked`. Moving,
+renaming, trashing, copying or zipping a private directory or any folder that
+contains one returns `409 private_folder`, locked or not. Setting, changing or
+removing a private directory through `POST /directories` or
+`DELETE /directories/{code}` also requires the unlocked vault.
+`GET /api/v1/album/vault/status` reports `private_folders`, the number of
+private directories. Details: [PHOTO-VAULT.md](PHOTO-VAULT.md#私密目录).

@@ -501,6 +501,8 @@ type entryDoc struct {
 	Mode    string `json:"mode"`
 	Symlink bool   `json:"symlink"`
 	Kind    string `json:"kind"`
+	// Private marks a private album directory, shown only once unlocked.
+	Private bool `json:"private,omitempty"`
 }
 
 // listingResponse is one page of one directory.
@@ -536,6 +538,10 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := r.URL.Query().Get("path")
+	gate := s.privateGate(r)
+	if privateError(w, gate.check(root, path, useInside)) {
+		return
+	}
 	l, err := s.Files.List(root, files.ListOptions{
 		Path: path, Page: page, PageSize: size,
 		Sort:  files.ParseSort(r.URL.Query().Get("sort")),
@@ -552,10 +558,14 @@ func (s *Server) handleFileList(w http.ResponseWriter, r *http.Request) {
 		Total: l.Total, Truncated: l.Truncated, Sort: l.Sort, Order: l.Order,
 	}
 	for _, e := range l.Entries {
+		if gate.hidden(root, e.Path) {
+			out.Total--
+			continue
+		}
 		out.Entries = append(out.Entries, entryDoc{
 			Name: e.Name, Path: e.Path, IsDir: e.IsDir, Size: e.Size,
 			ModTime: e.ModTime.Format(time.RFC3339), Mode: e.Mode,
-			Symlink: e.Symlink, Kind: e.Kind,
+			Symlink: e.Symlink, Kind: e.Kind, Private: e.IsDir && gate.isFolder(root, e.Path),
 		})
 	}
 	if l.PageSize > 0 {
@@ -593,6 +603,10 @@ func (s *Server) handleFileStat(w http.ResponseWriter, r *http.Request) {
 			"the root and path parameters are required")
 		return
 	}
+	gate := s.privateGate(r)
+	if privateError(w, gate.check(root, path, useInside)) {
+		return
+	}
 	e, err := s.Files.Stat(root, path)
 	if err != nil {
 		status, code := mapFileErr(err)
@@ -604,7 +618,7 @@ func (s *Server) handleFileStat(w http.ResponseWriter, r *http.Request) {
 		"entry": entryDoc{
 			Name: e.Name, Path: e.Path, IsDir: e.IsDir, Size: e.Size,
 			ModTime: e.ModTime.Format(time.RFC3339), Mode: e.Mode,
-			Symlink: e.Symlink, Kind: e.Kind,
+			Symlink: e.Symlink, Kind: e.Kind, Private: e.IsDir && gate.isFolder(root, e.Path),
 		},
 		"preview_kind": kind,
 		"previewable":  previewable && !e.IsDir && (kind != "image" || e.Size <= min(s.Cfg.PreviewMaxBytes, s.Files.Limits().PreviewMaxBytes)),
@@ -624,6 +638,10 @@ func (s *Server) handleFileSearch(w http.ResponseWriter, r *http.Request) {
 			"the root and q parameters are required")
 		return
 	}
+	gate := s.privateGate(r)
+	if privateError(w, gate.check(root, r.URL.Query().Get("path"), useInside)) {
+		return
+	}
 	res, err := s.Files.Search(root, files.SearchOptions{
 		Path:     r.URL.Query().Get("path"),
 		Query:    q,
@@ -640,6 +658,9 @@ func (s *Server) handleFileSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	entries := make([]entryDoc, 0, len(res.Entries))
 	for _, e := range res.Entries {
+		if gate.hidden(root, e.Path) {
+			continue
+		}
 		entries = append(entries, entryDoc{
 			Name: e.Name, Path: e.Path, IsDir: e.IsDir, Size: e.Size,
 			ModTime: e.ModTime.Format(time.RFC3339), Mode: e.Mode,
@@ -685,6 +706,9 @@ func (s *Server) handleFilePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if privateError(w, s.privateGate(r).check(root, path, useInside)) {
+		return
+	}
 	f, fi, err := s.Files.Open(root, path)
 	if err != nil {
 		status, code := mapFileErr(err)

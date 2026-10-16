@@ -515,7 +515,7 @@ func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
 	}{Items: []item{}}
 	for _, c := range cols {
 		col, ok := s.Cfg.Collection(c.Code)
-		if !ok {
+		if !ok || !s.inScope(r, c.Code) {
 			continue
 		}
 		out.Items = append(out.Items, item{

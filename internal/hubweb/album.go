@@ -55,11 +55,28 @@ func (s *Server) handleAlbumStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]any{"configured": true, "connected": true, "mode": s.Album.Mode(), "index_ready": status.IndexReady, "version": status.Version, "paused": status.Paused, "pause_reason": status.PauseReason, "warnings": status.Warnings})
 }
-func (s *Server) handleAlbumCollections(w http.ResponseWriter, r *http.Request) {
+
+// albumFor picks the client for a request. Routes under /album/private/ read
+// only the private directories and need an unlocked vault session.
+func (s *Server) albumFor(w http.ResponseWriter, r *http.Request) (*album.Client, bool) {
 	if !s.requireAlbum(w) {
+		return nil, false
+	}
+	if !strings.HasPrefix(r.URL.Path, "/api/v1/album/private/") {
+		return s.Album, true
+	}
+	if !s.privateSession(r) {
+		privateError(w, errPrivateLocked)
+		return nil, false
+	}
+	return s.Album.Private(), true
+}
+func (s *Server) handleAlbumCollections(w http.ResponseWriter, r *http.Request) {
+	client, ok := s.albumFor(w, r)
+	if !ok {
 		return
 	}
-	result, err := s.Album.Collections(r.Context())
+	result, err := client.Collections(r.Context())
 	if err != nil {
 		s.albumError(w, err)
 		return
@@ -79,7 +96,8 @@ func albumQuery(r *http.Request) (album.Query, error) {
 	return album.Query{Collection: q.Get("collection"), Q: q.Get("q"), Kind: q.Get("kind"), From: q.Get("from"), To: q.Get("to"), Sort: q.Get("sort"), Cursor: q.Get("cursor"), Limit: limit, IncludeMissing: boolParam(r, "include_missing"), GPS: boolParam(r, "gps"), Fallback: boolParam(r, "fallback")}, nil
 }
 func (s *Server) handleAlbumList(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAlbum(w) {
+	client, ok := s.albumFor(w, r)
+	if !ok {
 		return
 	}
 	query, err := albumQuery(r)
@@ -87,7 +105,7 @@ func (s *Server) handleAlbumList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "bad_request", "相册每页数量无效")
 		return
 	}
-	result, err := s.Album.List(r.Context(), query)
+	result, err := client.List(r.Context(), query)
 	if err != nil {
 		s.albumError(w, err)
 		return
@@ -104,13 +122,14 @@ func (s *Server) handleAlbumList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, result)
 }
 func (s *Server) handleAlbumDetails(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAlbum(w) {
+	client, ok := s.albumFor(w, r)
+	if !ok {
 		return
 	}
 	if !s.publicAlbumID(w, r) {
 		return
 	}
-	result, err := s.Album.Details(r.Context(), r.PathValue("id"))
+	result, err := client.Details(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.albumError(w, err)
 		return
@@ -141,7 +160,8 @@ func albumDisposition(value, part, id string) string {
 	return mime.FormatMediaType("inline", map[string]string{"filename": name})
 }
 func (s *Server) handleAlbumStream(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAlbum(w) {
+	client, ok := s.albumFor(w, r)
+	if !ok {
 		return
 	}
 	if !s.publicAlbumID(w, r) {
@@ -160,7 +180,7 @@ func (s *Server) handleAlbumStream(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
-	response, err := s.Album.Stream(ctx, id, part, r.Method, r.Header)
+	response, err := client.Stream(ctx, id, part, r.Method, r.Header)
 	if err != nil {
 		s.albumError(w, err)
 		return

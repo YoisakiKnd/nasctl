@@ -59,12 +59,12 @@ type Item struct {
 	Note            string  `json:"note"`
 }
 
-func (it *Item) normalize() error {
+func (it *Item) normalize(prefix string) error {
 	if it.ID <= 0 || it.ID > 9007199254740991 || len(it.Name) > 1024 || len(it.RelDir) > 4096 {
 		return unavailable("相册返回了无效的媒体记录")
 	}
-	it.ThumbURL = fmt.Sprintf("/api/v1/album/media/%d/thumb", it.ID)
-	it.RawURL = fmt.Sprintf("/api/v1/album/media/%d/raw", it.ID)
+	it.ThumbURL = fmt.Sprintf("%s%d/thumb", prefix, it.ID)
+	it.RawURL = fmt.Sprintf("%s%d/raw", prefix, it.ID)
 	return nil
 }
 

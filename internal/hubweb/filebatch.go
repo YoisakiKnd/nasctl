@@ -38,6 +38,25 @@ func (s *Server) handleFileBatch(w http.ResponseWriter, r *http.Request) {
 		s.fileWriteError(w, err)
 		return
 	}
+	gate := s.privateGate(r)
+	use := map[string]privateUse{"copy": useCopy, "move": useMove, "trash": useMove}[o.Action]
+	var refused error
+	if o.Action == "copy" || o.Action == "move" {
+		refused = gate.check(o.ToRoot, o.Directory, useInside)
+	}
+	for _, item := range o.Items {
+		if refused != nil {
+			break
+		}
+		if o.Action == "restore" {
+			refused = gate.trashID(item.Root, item.ID)
+		} else {
+			refused = gate.check(item.Root, item.Path, use)
+		}
+	}
+	if privateError(w, refused) {
+		return
+	}
 	s.startBackground(w, r, "files.batch", FileBatchArgs(o), o.Digest(), true, func(ctx context.Context, job *hubstore.Job, _ *operations.Args) (jobs.Result, error) {
 		last := time.Time{}
 		result, err := s.Files.Batch(ctx, o, func(p files.BatchResult) {

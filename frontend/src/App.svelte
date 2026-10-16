@@ -5,6 +5,7 @@
   import { modeLabels } from './lib/format.js';
   import { userPages, allowedAdminPages, resolve, pageInfo, roleOf } from './lib/routes.js';
   import { loadTheme, applyTheme } from './lib/theme.js';
+  import { vault, startVault, lockVault } from './lib/vault.svelte.js';
   import Icon from './components/Icon.svelte';
   import Page from './components/Page.svelte';
   import Login from './components/Login.svelte';
@@ -45,6 +46,8 @@
     if (!visited.includes(next)) visited = [...visited, next];
     if (next === 'home' || next === 'admin') refresh();
   }
+  // Only device managers can unlock the vault, so only they track it.
+  $effect(() => {if (auth?.authenticated && canConfigure && auth.principal !== 'ai') return startVault();});
   function go(id) { if (window.location.hash !== '#' + id) window.location.hash = id; else route(); }
   function searchFiles(request) { fileSearch = {...request, id:++searchNumber}; go('files'); }
   function setTheme(value) { theme = value; applyTheme(value); }
@@ -106,6 +109,7 @@
 {/snippet}
 
 {#snippet account()}
+  {#if vault.status?.unlocked}<button class="vault-pill" title="私密内容已解锁，点击立即锁定" aria-label="私密内容已解锁，点击立即锁定" onclick={lockVault}><Icon name="unlock" size={15}/><span>已解锁</span></button>{/if}
   <button class="theme-toggle icon-button" aria-label={theme === 'dark' || (theme === 'system' && matchMedia?.('(prefers-color-scheme: dark)')?.matches) ? '切换浅色模式' : '切换深色模式'} onclick={() => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark')}><Icon name="moon" size={18} class="theme-moon"/><Icon name="sun" size={18} class="theme-sun"/></button>
   <AccountMenu {displayName} roleLabel={roleLabel} {theme} adminHref={adminPages[0]?.id || ''} canLogout={Boolean(auth.required)} pending={authPending} onthemechange={setTheme} onlogout={logout}/>
 {/snippet}

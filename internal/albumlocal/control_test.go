@@ -353,3 +353,77 @@ func TestWorkerCancellationAndBusyAdmission(t *testing.T) {
 		t.Fatal("cancel did not clear busy")
 	}
 }
+
+func TestPrivateDirectoryIsReadOnlyThroughThePrivateScope(t *testing.T) {
+	c, cfg, _ := controlRig(t, "exit 0\n")
+	ctx := context.Background()
+	for _, dir := range []string{"Photos/Trip", "Secret"} {
+		if err := os.MkdirAll(filepath.Join(cfg.Hub.Storage[0].Path, dir), 0750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	public := album.Directory{Code: "photos", Name: "Photos", Root: "data", Path: "Photos", Enabled: true, AllowSharedVolume: true}
+	if err := c.Configure(ctx, public); err != nil {
+		t.Fatal(err)
+	}
+	// A private directory inside an ordinary one would stay visible through
+	// the ordinary one, so the overlap is refused in both directions.
+	nested := album.Directory{Code: "trip", Name: "Trip", Root: "data", Path: "Photos/Trip", Enabled: true, AllowSharedVolume: true, Private: true}
+	if err := c.Configure(ctx, nested); err == nil || !strings.HasPrefix(err.Error(), "私密目录") {
+		t.Fatal("nested private directory accepted", err)
+	}
+	private := album.Directory{Code: "secret", Name: "Secret", Root: "data", Path: "Secret", Enabled: true, AllowSharedVolume: true, Private: true}
+	if err := c.Configure(ctx, private); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.PrivateFolders(); len(got) != 1 || got[0] != (album.Folder{Root: "data", Path: "Secret"}) {
+		t.Fatal("private folders", got)
+	}
+	st, err := store.Open(cfg.Paths.IndexFile, store.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	root := filepath.Join(cfg.Hub.Storage[0].Path, "Secret")
+	col, err := st.UpsertCollection(ctx, "secret", "Secret", root, "", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, err := st.UpsertMedia(ctx, store.MediaScan{CollectionID: col, CollectionCode: "secret", RelPath: "me.jpg", BaseName: "me.jpg", Ext: "jpg", Kind: "image", Size: 6, RunToken: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "me.jpg"), []byte("abcdef"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	client, _ := album.NewHandler(c.Reader)
+	defer client.Close()
+	id := strconv.FormatInt(up.ID, 10)
+	if page, err := client.List(ctx, album.Query{}); err != nil || len(page.Items) != 0 || page.TotalEstimate != 0 {
+		t.Fatal("private photo in the ordinary album", page, err)
+	}
+	if _, err := client.Details(ctx, id); err == nil {
+		t.Fatal("private photo readable by id")
+	}
+	if response, err := client.Stream(ctx, id, "raw", "GET", nil); err == nil {
+		response.Body.Close()
+		t.Fatal("private original readable through the ordinary scope")
+	}
+	if _, err := client.List(ctx, album.Query{Collection: "secret"}); err == nil {
+		t.Fatal("private directory listable by name")
+	}
+	scoped := client.Private()
+	page, err := scoped.List(ctx, album.Query{})
+	if err != nil || len(page.Items) != 1 || page.TotalEstimate != 1 || !strings.HasPrefix(page.Items[0].ThumbURL, "/api/v1/album/private/media/") {
+		t.Fatal("private scope listing", page, err)
+	}
+	response, err := scoped.Stream(ctx, id, "raw", "GET", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := io.ReadAll(response.Body)
+	response.Body.Close()
+	if string(data) != "abcdef" {
+		t.Fatal("private original", string(data))
+	}
+}

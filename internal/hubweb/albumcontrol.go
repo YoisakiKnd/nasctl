@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/YoisakiKnd/nasctl/internal/album"
@@ -55,7 +56,20 @@ func (s *Server) handleAlbumDirectory(w http.ResponseWriter, r *http.Request) {
 	} else if !albumInput(w, r, &input) {
 		return
 	}
-	args := operations.NewArgs().Str("code", input.Code).Str("root", input.Root).Str("path", input.Path).Str("name", input.Name).Bool("enabled", input.Enabled).Bool("allow_shared_volume", input.AllowSharedVolume).Bool("remove", remove)
+	// Making a directory private, or changing or removing one that is, needs
+	// the vault password: otherwise anyone who can manage the album could
+	// switch the protection off.
+	touchesPrivate := input.Private
+	for _, d := range s.AlbumControl.Configuration().Directories {
+		if d.Code == input.Code && d.Private {
+			touchesPrivate = true
+		}
+	}
+	if touchesPrivate && !s.privateSession(r) {
+		writeError(w, 403, "vault_locked", "修改私密目录需要先解锁保险箱。\n私密目录只能由设备管理员在解锁保险箱后设置、修改或取消。")
+		return
+	}
+	args := operations.NewArgs().Str("code", input.Code).Str("root", input.Root).Str("path", input.Path).Str("name", input.Name).Bool("enabled", input.Enabled).Bool("allow_shared_volume", input.AllowSharedVolume).Bool("private", input.Private).Bool("remove", remove)
 	if op, ok := s.Jobs.Registry().Lookup("album.configure"); !ok || op.Check(args) != nil {
 		writeError(w, 400, "bad_request", "相册目录参数无效")
 		return
@@ -77,7 +91,13 @@ func (s *Server) handleAlbumDirectory(w http.ResponseWriter, r *http.Request) {
 		return jobs.Result{Completed: err == nil, Detail: "本地相册目录配置已更新；原文件未修改"}, err
 	}})
 	if out.Err != nil {
-		writeError(w, 400, "album_configuration", "目录未保存，请检查存储目录、集合代码、名称及运行任务")
+		message := "目录未保存，请检查存储目录、集合代码、名称及运行任务"
+		if detail := out.Err.Error(); strings.HasPrefix(detail, "私密目录") {
+			message = detail
+		} else if detail != "" {
+			message += "\n" + detail
+		}
+		writeError(w, 400, "album_configuration", message)
 		return
 	}
 	writeJSON(w, 200, s.AlbumControl.Configuration())

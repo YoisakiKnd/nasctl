@@ -27,9 +27,26 @@ func invalid(message string) error     { return &Error{400, "bad_request", messa
 func unavailable(message string) error { return &Error{502, "album_unavailable", message} }
 
 type Client struct {
-	base string
-	mode string
-	http *http.Client
+	base    string
+	mode    string
+	http    *http.Client
+	private bool
+}
+
+// Private returns a client that reads only the private directories. The
+// console hands it out only after checking the caller's vault session.
+func (c *Client) Private() *Client {
+	scoped := *c
+	scoped.private = true
+	return &scoped
+}
+
+// mediaPrefix is the console route the browser uses for this client's media.
+func (c *Client) mediaPrefix() string {
+	if c.private {
+		return "/api/v1/album/private/media/"
+	}
+	return "/api/v1/album/media/"
 }
 
 func (c *Client) Close() {
@@ -39,6 +56,13 @@ func (c *Client) Close() {
 }
 func (c *Client) Mode() string { return c.mode }
 func (c *Client) request(ctx context.Context, method, endpoint string, headers http.Header) (*http.Response, error) {
+	if c.private {
+		if strings.Contains(endpoint, "?") {
+			endpoint += "&scope=private"
+		} else {
+			endpoint += "?scope=private"
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, method, c.base+endpoint, nil)
 	if err != nil {
 		return nil, unavailable("相册连接配置无效")
@@ -189,7 +213,7 @@ func (c *Client) List(ctx context.Context, q Query) (Listing, error) {
 		return Listing{}, unavailable("相册响应超过分页上限")
 	}
 	for i := range out.Items {
-		if err = out.Items[i].normalize(); err != nil {
+		if err = out.Items[i].normalize(c.mediaPrefix()); err != nil {
 			return Listing{}, err
 		}
 	}
@@ -209,7 +233,7 @@ func (c *Client) Details(ctx context.Context, id string) (Details, error) {
 	if strconv.FormatInt(out.Item.ID, 10) != id {
 		return out, unavailable("相册返回了不同的媒体编号")
 	}
-	if err := out.Item.normalize(); err != nil {
+	if err := out.Item.normalize(c.mediaPrefix()); err != nil {
 		return out, err
 	}
 	if len(out.Exif) > 50 || len(out.Paths) > 10 {

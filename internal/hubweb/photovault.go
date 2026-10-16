@@ -18,10 +18,53 @@ import (
 
 const vaultCookie = "nasctl_photo_vault"
 
+// vaultCookiePath covers private folders in the file browser as well as the
+// vault itself. Releases up to 0.4 scoped the cookie to the vault routes;
+// legacyVaultPath clears that copy so it cannot shadow the new one.
+const vaultCookiePath = "/api/v1"
+const legacyVaultPath = "/api/v1/album/vault"
+
+func setVaultCookie(w http.ResponseWriter, r *http.Request, token string) {
+	legacy := &http.Cookie{Name: vaultCookie, Value: "", Path: legacyVaultPath, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil, MaxAge: -1}
+	http.SetCookie(w, legacy)
+	// A session cookie: the server-side session expires after 15 idle minutes.
+	cookie := &http.Cookie{Name: vaultCookie, Value: token, Path: vaultCookiePath, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil}
+	if token == "" {
+		cookie.MaxAge = -1
+	}
+	http.SetCookie(w, cookie)
+}
+
+// vaultStatus is the vault snapshot plus how many private directories exist.
+type vaultStatus struct {
+	photovault.Snapshot
+	PrivateFolders int `json:"private_folders"`
+}
+
+func (s *Server) vaultStatus(token, owner string) vaultStatus {
+	out := vaultStatus{}
+	if s.PhotoVault != nil {
+		out.Snapshot = s.PhotoVault.Status(token, owner)
+	}
+	if s.AlbumControl != nil {
+		for _, d := range s.AlbumControl.Configuration().Directories {
+			if d.Private {
+				out.PrivateFolders++
+			}
+		}
+	}
+	return out
+}
+
 func (s *Server) vaultIdentity(r *http.Request) (string, string) {
 	token := ""
-	if c, e := r.Cookie(vaultCookie); e == nil && len(c.Value) == 43 {
-		token = c.Value
+	// An expired cookie from the old, narrower path may arrive alongside the
+	// current one; use the first that has the shape of a token.
+	for _, c := range r.CookiesNamed(vaultCookie) {
+		if len(c.Value) == 43 {
+			token = c.Value
+			break
+		}
 	}
 	credential := s.presentedToken(r)
 	if c, e := r.Cookie(sessionCookie); e == nil {
@@ -64,12 +107,8 @@ func (s *Server) handleVaultStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 403, "denied", "此账号无权访问照片保险箱")
 		return
 	}
-	if s.PhotoVault == nil {
-		writeJSON(w, 200, photovault.Snapshot{})
-		return
-	}
 	token, owner := s.vaultIdentity(r)
-	writeJSON(w, 200, s.PhotoVault.Status(token, owner))
+	writeJSON(w, 200, s.vaultStatus(token, owner))
 }
 func (s *Server) handleVaultPassword(w http.ResponseWriter, r *http.Request) {
 	if !s.vaultAccess(w, r) {
@@ -79,8 +118,8 @@ func (s *Server) handleVaultPassword(w http.ResponseWriter, r *http.Request) {
 	token, owner := s.vaultIdentity(r)
 	if operation == "lock" {
 		s.PhotoVault.Lock(token, owner)
-		http.SetCookie(w, &http.Cookie{Name: vaultCookie, Value: "", Path: "/api/v1/album/vault", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil, MaxAge: -1})
-		writeJSON(w, 200, s.PhotoVault.Status("", owner))
+		setVaultCookie(w, r, "")
+		writeJSON(w, 200, s.vaultStatus("", owner))
 		return
 	}
 	var input struct {
@@ -120,9 +159,9 @@ func (s *Server) handleVaultPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if operation == "unlock" {
-		http.SetCookie(w, &http.Cookie{Name: vaultCookie, Value: token, Path: "/api/v1/album/vault", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil, MaxAge: 900})
+		setVaultCookie(w, r, token)
 	}
-	writeJSON(w, 200, s.PhotoVault.Status(token, owner))
+	writeJSON(w, 200, s.vaultStatus(token, owner))
 }
 func (s *Server) handleVaultList(w http.ResponseWriter, r *http.Request) {
 	if !s.vaultAccess(w, r) {
@@ -138,6 +177,7 @@ func (s *Server) handleVaultList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token, owner := s.vaultIdentity(r)
+	s.PhotoVault.Extend(token, owner)
 	items, total, e := s.PhotoVault.List(r.Context(), token, owner, page)
 	if e != nil {
 		s.vaultError(w, e)
@@ -169,6 +209,7 @@ func (s *Server) handleVaultStream(w http.ResponseWriter, r *http.Request) {
 		defer func() { <-s.streamSlots }()
 	}
 	token, owner := s.vaultIdentity(r)
+	s.PhotoVault.Extend(token, owner)
 	reader, item, mime, e := s.PhotoVault.OpenMedia(r.Context(), token, owner, r.PathValue("id"), part)
 	if e != nil {
 		s.vaultError(w, e)

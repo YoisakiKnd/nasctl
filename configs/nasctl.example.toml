@@ -394,6 +394,12 @@ exclude = ["@eaDir", "*.tmp", "Thumbs.db"]
 # data_mount check above is NOT affected and cannot be turned off.
 allow_shared_volume = false
 
+# Private keeps this directory's photos and videos out of the ordinary album
+# and the file browser. Nothing is moved or encrypted: the files stay here and
+# open only after the vault password is entered in the web console. A private
+# directory may not contain, or sit inside, an ordinary collection.
+private = false
+
 # A second collection, e.g. a different share. Remove if unused.
 [[collections]]
 code = "video"

@@ -16,16 +16,23 @@ import (
 // private names before another descriptor is opened. This preserves ordinary
 // in-root links without permitting aliases into trash, staging or backup vaults.
 func safeOpen(root *os.Root, rel string, flags int) (*os.File, error) {
+	f, _, err := safeOpenResolved(root, rel, flags)
+	return f, err
+}
+
+// safeOpenResolved also reports the link-free path it opened, relative to the
+// root, so a caller can judge the real location rather than the spelling.
+func safeOpenResolved(root *os.Root, rel string, flags int) (*os.File, string, error) {
 	clean, err := cleanRel(rel)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if len(clean) > 4096 {
-		return nil, ErrBadPath
+		return nil, "", ErrBadPath
 	}
 	base, err := root.OpenFile(".", os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NONBLOCK, 0)
 	if err != nil {
-		return nil, mapErr(err)
+		return nil, "", mapErr(err)
 	}
 	current := base
 	defer func() {
@@ -52,14 +59,14 @@ func safeOpen(root *os.Root, rel string, flags int) (*os.File, error) {
 		}
 		if part == ".." {
 			if len(resolved) == 0 {
-				return nil, ErrOutsideRoot
+				return nil, "", ErrOutsideRoot
 			}
 			queue = append(append([]string{}, resolved[:len(resolved)-1]...), queue...)
 			reset()
 			continue
 		}
 		if internalName(part) {
-			return nil, ErrOutsideRoot
+			return nil, "", ErrOutsideRoot
 		}
 		last := len(queue) == 0
 		openFlags := unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NONBLOCK | unix.O_NOFOLLOW | unix.O_CLOEXEC
@@ -70,7 +77,7 @@ func safeOpen(root *os.Root, rel string, flags int) (*os.File, error) {
 		if e == nil {
 			f := os.NewFile(uintptr(fd), part)
 			if last {
-				return f, nil
+				return f, path.Join(append(append([]string{}, resolved...), part)...), nil
 			}
 			if current != base {
 				_ = current.Close()
@@ -81,42 +88,42 @@ func safeOpen(root *os.Root, rel string, flags int) (*os.File, error) {
 		}
 		var st unix.Stat_t
 		if statErr := unix.Fstatat(int(current.Fd()), part, &st, unix.AT_SYMLINK_NOFOLLOW); statErr != nil {
-			return nil, mapErr(e)
+			return nil, "", mapErr(e)
 		}
 		if uint32(st.Mode)&unix.S_IFMT != unix.S_IFLNK {
-			return nil, mapErr(e)
+			return nil, "", mapErr(e)
 		}
 		links++
 		if links > 40 {
-			return nil, ErrOutsideRoot
+			return nil, "", ErrOutsideRoot
 		}
 		var buffer [4097]byte
 		n, e := unix.Readlinkat(int(current.Fd()), part, buffer[:])
 		if e != nil {
-			return nil, mapErr(e)
+			return nil, "", mapErr(e)
 		}
 		if n == 0 || n == len(buffer) {
-			return nil, ErrBadPath
+			return nil, "", ErrBadPath
 		}
 		target := string(buffer[:n])
 		if strings.HasPrefix(target, "/") {
-			return nil, ErrOutsideRoot
+			return nil, "", ErrOutsideRoot
 		}
 		next := append([]string{}, resolved...)
 		next = append(next, strings.Split(target, "/")...)
 		next = append(next, queue...)
 		if len(next) > 4096 {
-			return nil, ErrBadPath
+			return nil, "", ErrBadPath
 		}
 		queue = next
 		reset()
 	}
 	fd, err := unix.Dup(int(current.Fd()))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	unix.CloseOnExec(fd)
-	return os.NewFile(uintptr(fd), "."), nil
+	return os.NewFile(uintptr(fd), "."), path.Join(append([]string{"."}, resolved...)...), nil
 }
 
 type statInfo struct {

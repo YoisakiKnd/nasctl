@@ -4,13 +4,72 @@
 [DEPLOYMENT.md](DEPLOYMENT.md#升级与检查点)，状态包细节见 [STATE-BACKUPS.md](STATE-BACKUPS.md)。
 
 跨多个版本升级时，从当前版本开始按顺序阅读各节；可以一次直接安装最新程序，但要完成
-途经各节里的手工步骤。例如 0.2.x 升级到 0.4.0：先按“0.2.x / 0.1.x → 0.3.0”处理 albumctl
-合并和配置，再看“0.3.x → 0.4.0”。
+途经各节里的手工步骤。例如 0.2.x 升级到 0.5.0：先按“0.2.x / 0.1.x → 0.3.0”处理 albumctl
+合并和配置，再依次看“0.3.x → 0.4.0”和“0.4.x → 0.5.0”。
 
 | 当前版本 | 需要阅读 |
 | --- | --- |
-| 0.3.x | [0.3.x → 0.4.0](#03x--040) |
-| 0.2.x、0.1.x | [0.2.x / 0.1.x → 0.3.0](#02x--01x--030)，然后 [0.3.x → 0.4.0](#03x--040) |
+| 0.4.x | [0.4.x → 0.5.0](#04x--050) |
+| 0.3.x | [0.3.x → 0.4.0](#03x--040)，然后 [0.4.x → 0.5.0](#04x--050) |
+| 0.2.x、0.1.x | [0.2.x / 0.1.x → 0.3.0](#02x--01x--030)，然后 [0.3.x → 0.4.0](#03x--040)、[0.4.x → 0.5.0](#04x--050) |
+
+## 0.4.x → 0.5.0
+
+这一版**没有必须手工处理的配置或数据变化**，替换程序并重启即可。新功能“私密目录”默认不启用。
+
+### 变化一览
+
+| 变化 | 影响 | 需要做什么 |
+| --- | --- | --- |
+| 新增私密目录 | 相册目录可设为私密：文件留在原处，解锁保险箱后才能在相册和文件页看到 | 想用时按 [PHOTO-VAULT.md](PHOTO-VAULT.md#私密目录) 设置；不用则无影响 |
+| 主配置 `[[collections]]` 新增可选键 `private` | 默认 `false` | 无；私密目录不能与普通目录互相包含，设置时会检查 |
+| 保险箱会话改为“闲置 15 分钟”自动锁定 | 查看私密内容会重新计时，看长视频不会中途锁定 | 无 |
+| 保险箱不再因切换页面而锁定 | 解锁后可以在相册、文件页之间切换；标签页隐藏超过 2 分钟、关闭或刷新页面仍会锁定；右上角“已解锁”按钮可随时锁定 | 无 |
+| 保险箱 Cookie 范围从 `/api/v1/album/vault` 扩大到 `/api/v1` | 文件页也能识别解锁状态；仍是 HttpOnly、SameSite=Strict 的会话 Cookie | 无；旧 Cookie 会在下次解锁或锁定时自动清除 |
+| 修改、移除私密目录需要解锁保险箱 | 操作者等能管理相册的账号无法关掉保护 | 无 |
+| 新增 API `/api/v1/album/private/…` | 只在解锁后可用；文件 API 遇到私密目录返回 `403 vault_locked` 或 `409 private_folder` | 自己写的脚本如果遍历文件，请处理这两个错误代码 |
+| 系统设置、相册管理、保险箱和“我的”页面改版 | 地址不变；设置项和保存方式（校验后保存、重启生效）不变 | 无 |
+
+配置、账号、状态库、相册索引（schema 2）和追番库（schema 5）都没有改变。设置了私密目录后，
+`state_dir/album-directories.json` 中对应条目会多出 `"private": true`。
+
+### 升级步骤
+
+与 0.3.x → 0.4.0 相同：校验安装包，保留旧程序，建立状态检查点，替换程序并启动
+（把下面示例里的版本号换成 0.5.0）。systemd 单元不需要更新。
+
+```sh
+mkdir -p ~/nasctl-0.4-rollback
+sudo cp -a /usr/local/bin/nasctl ~/nasctl-0.4-rollback/
+sudo systemctl stop nasctl-web.service
+sudo /usr/local/bin/nasctl --config /etc/albumctl/config.toml state backup \
+  --package /mnt/backup-private/nasctl-state/before-0.5.0 --confirm
+sudo install -m 755 ./nasctl /usr/local/bin/nasctl.new
+sudo -u nasctl /usr/local/bin/nasctl.new --config /etc/albumctl/config.toml doctor
+sudo mv /usr/local/bin/nasctl.new /usr/local/bin/nasctl
+sudo systemctl start nasctl-web.service
+nasctl version   # 应显示 nasctl 0.5.0
+```
+
+### 验证
+
+- 浏览器刷新后，“管理后台 › 系统设置”显示为分区卡片，左侧有分区导航；
+- 已在用照片保险箱的，到“相册 › 保险箱”解锁，确认加密照片仍在“加密照片”中；
+- 想试用私密目录：建一个测试文件夹，在相册管理中添加为私密目录，锁定后确认它在文件页消失，
+  解锁后带锁形标记出现。
+
+### 回滚到 0.4.x
+
+```sh
+sudo systemctl stop nasctl-web.service
+sudo cp -a ~/nasctl-0.4-rollback/nasctl /usr/local/bin/nasctl
+sudo systemctl start nasctl-web.service
+```
+
+**设置过私密目录时，回滚前要先取消私密。** 0.4.x 不认识 `"private"`，读到它会拒绝加载相册
+目录配置；即使能加载，0.4.x 也不会隐藏这些目录。请在 0.5.0 中解锁保险箱，到相册管理把每个
+私密目录的“设为私密目录”关掉并保存，再回滚。主配置文件里加过 `private = …` 的，也要先删掉
+这一行，否则 0.4.x 会因为未知配置项拒绝启动。没有用过私密目录则无需处理。
 
 ## 0.3.x → 0.4.0
 

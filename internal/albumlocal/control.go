@@ -34,6 +34,7 @@ type Control struct {
 	binary, catalog string
 	busy            bool
 	launcher        *albumLauncher
+	private         []album.Folder
 }
 
 func NewControl(cfg *config.Config, fm *files.Manager, log *logx.Logger) (*Control, error) {
@@ -70,6 +71,7 @@ func NewControl(cfg *config.Config, fm *files.Manager, log *logx.Logger) (*Contr
 	if err != nil {
 		return nil, err
 	}
+	c.private = privateFolders(effective)
 	c.Reader = New(&effective, log)
 	c.Reader.files = fm
 	return c, nil
@@ -103,12 +105,64 @@ func (c *Control) effective(dirs []album.Directory) (config.Config, error) {
 		if d.Name == "" || len(d.Name) > 128 {
 			return cfg, errors.New("album directory name must contain 1–128 bytes")
 		}
-		cfg.Collections = append(cfg.Collections, config.Collection{Code: d.Code, Name: d.Name, Root: p, Enabled: d.Enabled, AllowSharedVolume: d.AllowSharedVolume})
+		cfg.Collections = append(cfg.Collections, config.Collection{Code: d.Code, Name: d.Name, Root: p, Enabled: d.Enabled, AllowSharedVolume: d.AllowSharedVolume, Private: d.Private})
+	}
+	for i, a := range cfg.Collections {
+		for _, b := range cfg.Collections[i+1:] {
+			if a.Private != b.Private && (fsutil.IsWithin(a.Root, b.Root) || fsutil.IsWithin(b.Root, a.Root)) {
+				return cfg, fmt.Errorf("私密目录「%s」和普通目录「%s」互相包含；私密目录必须单独存放，不能放在普通相册目录里面，也不能包含普通相册目录", privateName(a, b), publicName(a, b))
+			}
+		}
 	}
 	if err := cfg.Finalize(); err != nil {
 		return cfg, errors.New("album directory configuration is invalid; check code, duplicates and state/cache separation")
 	}
 	return cfg, nil
+}
+
+func privateName(a, b config.Collection) string {
+	if a.Private {
+		return a.Name
+	}
+	return b.Name
+}
+func publicName(a, b config.Collection) string {
+	if a.Private {
+		return b.Name
+	}
+	return a.Name
+}
+
+// PrivateFolders maps every private directory onto the storage root that
+// holds it. A main-config directory outside every root has no file-browser
+// presence, so only its album listing needs hiding.
+func (c *Control) PrivateFolders() []album.Folder {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]album.Folder(nil), c.private...)
+}
+func privateFolders(cfg config.Config) []album.Folder {
+	out := []album.Folder{}
+	for _, col := range cfg.Collections {
+		if !col.Private {
+			continue
+		}
+		for _, root := range cfg.Hub.Storage {
+			if !fsutil.IsWithin(root.Path, col.Root) {
+				continue
+			}
+			rel, err := filepath.Rel(root.Path, col.Root)
+			if err != nil {
+				continue
+			}
+			rel = filepath.ToSlash(rel)
+			if rel == "." {
+				rel = ""
+			}
+			out = append(out, album.Folder{Root: root.ID, Path: rel})
+		}
+	}
+	return out
 }
 
 func (c *Control) Configuration() album.Configuration {
@@ -119,7 +173,7 @@ func (c *Control) Configuration() album.Configuration {
 		out.WorkerAvailable = true
 	}
 	for _, d := range c.base.Collections {
-		out.Directories = append(out.Directories, album.Directory{Code: d.Code, Name: d.Name, Path: d.Root, Enabled: d.Enabled, AllowSharedVolume: d.AllowSharedVolume})
+		out.Directories = append(out.Directories, album.Directory{Code: d.Code, Name: d.Name, Path: d.Root, Enabled: d.Enabled, AllowSharedVolume: d.AllowSharedVolume, Private: d.Private})
 	}
 	for _, d := range c.directories {
 		d.Managed = true
@@ -242,6 +296,7 @@ func (c *Control) save(dirs []album.Directory) error {
 		return err
 	}
 	c.directories = dirs
+	c.private = privateFolders(cfg)
 	return nil
 }
 
