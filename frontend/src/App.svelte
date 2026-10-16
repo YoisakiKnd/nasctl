@@ -5,6 +5,8 @@
   import { fitWindow, newWindow } from './lib/windows.js';
   import Icon from './components/Icon.svelte';
   import AppWindow from './components/AppWindow.svelte';
+  import { appDestination } from './lib/app-links.js';
+  import DesktopApps from './components/DesktopApps.svelte';
   import DesktopLandscape from './components/DesktopLandscape.svelte';
   import Anime from './views/Anime.svelte';
   import Album from './views/Album.svelte';
@@ -29,6 +31,8 @@
   let auth = $state(null), authError = $state(''), authPending = $state(false);
   let windows = $state([]), active = $state(''), layer = 10;
   let areaWidth = $state(1200), areaHeight = $state(680), mobile = $state(false), now = $state(new Date());
+  let customApps=$state([]);
+  const shownCustomApps=$derived(customApps.filter(item=>(item.name+' '+item.url).toLowerCase().includes(appQuery.trim().toLowerCase())));
   let appQuery=$state(''), fileSearch=$state(null), searchNumber=0;
   const visibleApps=$derived(navigation.filter(item=>auth?.role==='viewer'?['overview','files','album','media'].includes(item.id):auth?.role==='operator'?['overview','files','album','media','jobs'].includes(item.id):true));
   const shownApps=$derived(visibleApps.filter((item)=>(item.label+item.hint+item.id).toLowerCase().includes(appQuery.trim().toLowerCase())));
@@ -61,7 +65,7 @@
   function close(id) { windows=windows.filter((frame)=>frame.id!==id); if(active===id) nextActive(); }
   function desktop() { windows=windows.map((frame)=>({...frame,minimized:true})); active=''; remember(''); }
   function searchFiles(){if(!appQuery.trim() || !searchRoot)return;fileSearch={id:++searchNumber,q:appQuery.trim().slice(0,128),root:searchRoot.id};open('files');}
-  function searchApps(event){event.preventDefault();if(shownApps.length===1)open(shownApps[0].id);else if(!shownApps.length)searchFiles();}
+  function searchApps(event){event.preventDefault();if(shownApps.length===1&&!shownCustomApps.length)open(shownApps[0].id);else if(!shownApps.length&&shownCustomApps.length===1)window.open(appDestination(shownCustomApps[0].url,window.location.hostname),'_blank','noopener,noreferrer');else if(!shownApps.length&&!shownCustomApps.length)searchFiles();}
   function route() { const hash=window.location.hash.slice(1); if(navigation.some((item)=>item.id===hash)) open(hash); }
   function toggleTheme() {
     theme = theme === 'light' ? 'dark' : 'light'; document.documentElement.dataset.theme = theme;
@@ -74,7 +78,7 @@
     catch (failure) {if (!disposed && current === generation && failure.name !== 'AbortError') error = failure.message;}
     finally {if (!disposed && current === generation) loading = false;}
   }
-  function expired() { auth = {...auth, required:true, authenticated:false}; windows=[]; active=''; appQuery=''; fileSearch=null; snapshot = null; error = ''; controller?.abort(); ++generation; }
+  function expired() { auth = {...auth, required:true, authenticated:false}; windows=[]; active=''; customApps=[]; appQuery=''; fileSearch=null; snapshot = null; error = ''; controller?.abort(); ++generation; }
   async function checkAuth() {
     if (authPending || disposed) return;
     authPending = true; authError = '';
@@ -123,8 +127,8 @@
         <form class="desktop-search desktop-glass" onsubmit={searchApps}><Icon name="search" size={18}/><input aria-label="搜索应用或文件" placeholder="搜索应用或文件…" bind:value={appQuery} maxlength="128"/><kbd>↵</kbd></form>
         {#if appQuery.trim() && searchRoot}<button class="desktop-file-search desktop-glass" onclick={searchFiles}><Icon name="folder" size={18}/><span>在“{searchRoot.label || searchRoot.id}”中搜索 <strong>{appQuery}</strong></span><Icon name="chevron" size={16}/></button>{/if}
         {#if auth.setup_requires_config&&auth.can_manage_device!==false}<div class="notice desktop-onboarding"><div><strong>启用账号登录</strong><p>先在本机配置持久登录保护，再为成员创建账号。</p></div><button class="button primary small" onclick={()=>open('settings')}>查看设置步骤</button></div>{:else if auth.setup_available&&!auth.accounts_enabled&&auth.can_manage_device!==false}<div class="notice desktop-onboarding"><div><strong>设置管理员账号</strong><p>使用用户名和密码登录你的 NAS，并为成员分配角色。</p></div><button class="button primary small" onclick={()=>open('settings')}>开始设置</button></div>{:else if snapshot&&roots.length===0&&auth.can_manage_device!==false}<div class="notice desktop-onboarding"><div><strong>添加你的存储目录</strong><p>选择 NAS 上已准备好的目录，开始浏览和管理文件。</p></div><button class="button primary small" onclick={()=>open('settings')}>添加目录</button></div>{/if}<div class="desktop-section-heading"><h1>应用</h1><span>你的私人空间</span></div>
-        <nav class="desktop-apps" aria-label="应用">{#each shownApps as item}<button class={'desktop-app nav-link '+item.color} onclick={()=>open(item.id)}><span class="app-icon"><Icon name={item.icon} size={29}/></span><strong>{item.label}</strong><small>{item.hint}</small></button>{/each}</nav>
-        {#if !shownApps.length}<p class="desktop-no-results">没有匹配的应用{searchRoot?'，可在上方搜索文件。':'。'}</p>{/if}
+        <nav class="desktop-apps" aria-label="应用">{#each shownApps as item}<button class={'desktop-app nav-link '+item.color} onclick={()=>open(item.id)}><span class="app-icon"><Icon name={item.icon} size={29}/></span><strong>{item.label}</strong><small>{item.hint}</small></button>{/each}<DesktopApps onchange={items=>customApps=items} query={appQuery} canConfigure={auth.can_manage_device!==false && auth.principal!=='ai' && !readOnly}/></nav>
+        {#if !shownApps.length&&!shownCustomApps.length}<p class="desktop-no-results">没有匹配的应用{searchRoot?'，可在上方搜索文件。':'。'}</p>{/if}
         {#if visibleApps.some(item=>item.id==='jobs')}<button class="desktop-glass desktop-task-summary" onclick={()=>open('jobs')}><span class="task-summary-icon"><Icon name="jobs" size={23}/></span><div><strong>任务动态</strong><span>{snapshot ? snapshot.running?.length ? snapshot.running.length+' 项任务正在进行' : '此刻没有任务运行' : '正在读取任务…'}</span></div>{#if snapshot?.attention?.length}<span class="desktop-attention">{snapshot.attention.length} 项需要留意</span>{:else}<span class="desktop-task-idle">{snapshot?'一切有序':'未获取'}</span>{/if}<Icon name="chevron" size={17}/></button>{/if}
         {#if error}<p class="notice error" role="alert">设备状态读取失败：{error}</p>{/if}
         <p class="desktop-tip">点击应用打开窗口 · 双击标题栏最大化 · 底部随时切换</p>

@@ -95,7 +95,7 @@ type Operation struct {
 // error and is caught at startup, not at call time.
 func (o Operation) Validate() error {
 	if o.MetadataOnly {
-		allowed := o.ID == "settings.configure" || o.ID == "users.configure" || o.ID == "users.password"
+		allowed := o.ID == "backup.webdav.configure" || o.ID == "apps.configure" || o.ID == "settings.configure" || o.ID == "users.configure" || o.ID == "users.password"
 		if !allowed || o.Async || o.ReadOnly || o.Class != domain.RiskMutating || o.Timeout > 15*time.Second {
 			return fmt.Errorf("operation %s: metadata_only requires an allowlisted synchronous bounded settings/account mutation", o.ID)
 		}

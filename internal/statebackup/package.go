@@ -55,7 +55,7 @@ func NewLayout(cfg *config.Config, configPath, hubPath string) Layout {
 	return Layout{canonical(cfg.Paths.StateDir), canonical(hubPath), canonical(cfg.Paths.IndexFile), canonical(configPath), cfg.Hub.Storage}
 }
 func (l Layout) targets() map[string]string {
-	return map[string]string{"hub": l.Hub, "anime": filepath.Join(l.State, "anime.sqlite"), "album": l.Album, "album-directories": filepath.Join(l.State, "album-directories.json"), "backup-plans": filepath.Join(l.State, "backup-plans.json"), "metadata": filepath.Join(l.State, "anime-metadata-backups"), "settings": filepath.Join(l.State, config.NASSettingsFile), "users": filepath.Join(l.State, accounts.FileName), "users-enabled": filepath.Join(l.State, accountslocal.EnabledFile)}
+	return map[string]string{"hub": l.Hub, "anime": filepath.Join(l.State, "anime.sqlite"), "album": l.Album, "album-directories": filepath.Join(l.State, "album-directories.json"), "backup-plans": filepath.Join(l.State, "backup-plans.json"), "desktop-apps": filepath.Join(l.State, "desktop-apps.json"), "webdav-history": filepath.Join(l.State, "webdav-history.json"), "metadata": filepath.Join(l.State, "anime-metadata-backups"), "settings": filepath.Join(l.State, config.NASSettingsFile), "users": filepath.Join(l.State, accounts.FileName), "users-enabled": filepath.Join(l.State, accountslocal.EnabledFile)}
 }
 func (l Layout) fingerprint() string {
 	l.Storage = nil
@@ -163,7 +163,7 @@ func nonce() (string, error) {
 }
 func keyValid(k string) bool {
 	switch k {
-	case "config", "hub", "anime", "album", "album-directories", "backup-plans", "settings", "users", "users-enabled":
+	case "config", "hub", "anime", "album", "album-directories", "backup-plans", "desktop-apps", "webdav-history", "settings", "users", "users-enabled":
 		return true
 	}
 	if !strings.HasPrefix(k, "metadata/") {
@@ -439,7 +439,7 @@ func capture(ctx context.Context, l Layout, dir string, internal bool, report fu
 		return result, fmt.Errorf("state backup config: %w", err)
 	}
 	targets := l.targets()
-	for _, key := range []string{"hub", "anime", "album", "album-directories", "backup-plans", "settings", "users", "users-enabled"} {
+	for _, key := range []string{"hub", "anime", "album", "album-directories", "backup-plans", "desktop-apps", "webdav-history", "settings", "users", "users-enabled"} {
 		if err = add(key, targets[key], key == "hub"); err != nil {
 			return result, fmt.Errorf("state backup %s: %w", key, err)
 		}

@@ -353,7 +353,7 @@ func restore(ctx context.Context, l Layout, dir, digest string, report func(stri
 			}
 		}
 	}()
-	for _, key := range []string{"hub", "anime", "album", "album-directories", "backup-plans", "metadata", "settings", "users", "users-enabled"} {
+	for _, key := range []string{"hub", "anime", "album", "album-directories", "backup-plans", "desktop-apps", "webdav-history", "metadata", "settings", "users", "users-enabled"} {
 		target := targets[key]
 		old, e := digestPath(ctx, target)
 		if e != nil {

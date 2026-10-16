@@ -33,6 +33,8 @@ import (
 	"github.com/YoisakiKnd/nasctl/internal/anime"
 	"github.com/YoisakiKnd/nasctl/internal/backups"
 	"github.com/YoisakiKnd/nasctl/internal/buildinfo"
+	"github.com/YoisakiKnd/nasctl/internal/cloudbackup"
+	"github.com/YoisakiKnd/nasctl/internal/desktopapps"
 	"github.com/YoisakiKnd/nasctl/internal/domain"
 	"github.com/YoisakiKnd/nasctl/internal/files"
 	"github.com/YoisakiKnd/nasctl/internal/hubstore"
@@ -113,6 +115,8 @@ type Server struct {
 	PhotoVault   *photovault.Store
 	VaultMover   photovault.Mover
 	vaultAuth    browserAuth
+	CloudBackups cloudbackup.Control
+	Apps         desktopapps.Control
 	Backups      backups.Control
 	Settings     settings.Control
 	Accounts     accounts.Control
@@ -207,6 +211,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/users/{id}", s.handleUsers)
 
 	// API: reads.
+	mux.HandleFunc("GET /api/v1/apps", s.handleApps)
+	mux.HandleFunc("PUT /api/v1/apps", s.handleApps)
 	mux.HandleFunc("GET /api/v1/overview", s.handleOverview)
 	mux.HandleFunc("GET /api/v1/ops", s.handleOps)
 	mux.HandleFunc("GET /api/v1/audit", s.handleAudit)
@@ -233,6 +239,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/files/move", s.handleFileBackground)
 	mux.HandleFunc("POST /api/v1/files/purge", s.handleFileBackground)
 	mux.HandleFunc("POST /api/v1/files/batch", s.handleFileBatch)
+	mux.HandleFunc("GET /api/v1/backup/webdav", s.handleCloudSettings)
+	mux.HandleFunc("PUT /api/v1/backup/webdav", s.handleCloudSettings)
+	mux.HandleFunc("POST /api/v1/backup/webdav/probe", s.handleCloudProbe)
+	mux.HandleFunc("POST /api/v1/backup/webdav/{action}", s.handleCloudWork)
+	mux.HandleFunc("GET /api/v1/backup/webdav/{id}/download", s.handleCloudDownload)
+	mux.HandleFunc("HEAD /api/v1/backup/webdav/{id}/download", s.handleCloudDownload)
 	mux.HandleFunc("GET /api/v1/backup/settings", s.handleBackupSettings)
 	mux.HandleFunc("POST /api/v1/backup/plans", s.handleBackupPlan)
 	mux.HandleFunc("DELETE /api/v1/backup/plans/{id}", s.handleBackupPlan)
@@ -345,6 +357,9 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 
 		defer func() {
 			if rec := recover(); rec != nil {
+				if rec == http.ErrAbortHandler {
+					panic(rec)
+				}
 				if s.Log != nil {
 					s.Log.Error("handler panic", "path", r.URL.Path, "panic", fmt.Sprint(rec))
 				}

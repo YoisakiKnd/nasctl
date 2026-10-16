@@ -106,3 +106,5 @@ nasctl --config /etc/albumctl/config.toml state recover --confirm
 独立 CLI 进程流程通过备份、校验、错误摘要拒绝、模式状态回滚和检查点复验。
 CI 增加等价脚本，但没有据此声称远程 CI 已运行。真实 NAS 断电、物理挂载丢失、存储
 硬件损坏和现场 systemd 升级／回滚仍需实际设备验收。
+
+状态包还保存桌面应用入口和无密码的 WebDAV 版本历史。WebDAV 登录凭据、失败上传的密文暂存包不进入状态包；恢复后请重新填写连接。保险箱的完整备份可在 WebDAV 中选择“照片保险箱（加密数据）”，详见 [WebDAV 备份](WEBDAV-BACKUP.md)。

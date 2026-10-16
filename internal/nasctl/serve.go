@@ -18,7 +18,9 @@ import (
 	"github.com/YoisakiKnd/nasctl/internal/anime"
 	"github.com/YoisakiKnd/nasctl/internal/backuplocal"
 	"github.com/YoisakiKnd/nasctl/internal/buildinfo"
+	"github.com/YoisakiKnd/nasctl/internal/cloudbackup"
 	"github.com/YoisakiKnd/nasctl/internal/config"
+	"github.com/YoisakiKnd/nasctl/internal/desktopapps"
 	"github.com/YoisakiKnd/nasctl/internal/domain"
 	"github.com/YoisakiKnd/nasctl/internal/files"
 	"github.com/YoisakiKnd/nasctl/internal/hubstore"
@@ -268,6 +270,14 @@ func cmdServe(ctx context.Context, env Env, cfg *config.Config, g globals, args 
 	srv.Anime = animeEngine
 	srv.Accounts = users
 	srv.Settings = settingslocal.New(cfg)
+	srv.Apps = desktopapps.New(cfg.Paths.StateDir)
+	cloudBackups, cloudErr := cloudbackup.New(cfg.Paths.StateDir, fm)
+	if cloudErr != nil {
+		fmt.Fprintf(env.Stderr, "nasctl: WebDAV backup configuration could not be loaded: %v\n", cloudErr)
+	} else {
+		defer cloudBackups.Close()
+		srv.CloudBackups = cloudBackups
+	}
 	srv.Album = albumClient
 	if albumControl != nil {
 		srv.AlbumControl = albumControl
@@ -278,6 +288,9 @@ func cmdServe(ctx context.Context, env Env, cfg *config.Config, g globals, args 
 		}
 		defer vault.Close()
 		srv.PhotoVault = vault
+		if cloudBackups != nil {
+			cloudBackups.Vault = vault
+		}
 		srv.VaultMover = albumControl
 	}
 	srv.WorkContext = workCtx

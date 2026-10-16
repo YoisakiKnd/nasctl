@@ -19,7 +19,7 @@ const content=async(root,path)=>{const r=await request('/api/v1/files/download?'
 w.fetch=request;w.AbortController=AbortController;w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
 w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
 try{
- w.eval(await(await request('/app.js')).text());await wait(()=>button('新建计划')&&!button('新建计划').disabled,'backup view');
+ w.eval(await(await request('/app.js')).text());await wait(()=>button('本地副本'),'backup tabs');click('本地副本');await wait(()=>button('新建计划')&&!button('新建计划').disabled,'backup view');
  check(!d.body.textContent.includes('备份服务尚未接入'),'native backup replaces placeholder');
  click('新建计划');await wait(()=>d.querySelector('dialog[open]'),'plan form');
  field('备份计划编号','generated');field('备份计划名称','Generated backup');field('备份源存储目录','source');field('备份源相对位置','documents');field('备份目标存储目录','backup');field('备份保留份数','3');field('备份条目上限','50');field('备份字节上限','1048576');field('备份最长运行时间','1m');

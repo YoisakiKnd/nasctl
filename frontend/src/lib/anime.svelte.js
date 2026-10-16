@@ -2,7 +2,7 @@ import { api, json, query } from './api.js';
 
 export function createAnimeController({readSettings=()=>true}={}) {
   const data = $state({
-    status: null, settings: null, connection: null, subscriptions: [], episodes: [], offset: 0, filter: '', subscription: 0, watch: '',
+    status: null, settings: null, connection: null, subscriptions: [], episodes: [], continueWatching: [], offset: 0, filter: '', subscription: 0, watch: '',
     loading: true, pending: false, error: '', message: '', task: '', taskActive: false, taskInfo: null, metadataOptions: null, historyOptions: null,
   });
   let request;
@@ -18,16 +18,18 @@ export function createAnimeController({readSettings=()=>true}={}) {
     if (!quiet) data.loading = true;
     try {
       const status = await api('/api/v1/anime/status', options);
-      const [subscriptions, episodes, settings] = status.configured ? await Promise.all([
+      const [subscriptions, episodes, settings, continueWatching] = status.configured ? await Promise.all([
         api('/api/v1/anime/subscriptions', options),
         api(query('/api/v1/anime/episodes', { state: data.filter, limit: 50, offset: data.offset, subscription: data.subscription, watch: data.watch }), options),
         !readSettings()?Promise.resolve(null):data.settings ? Promise.resolve(data.settings) : api('/api/v1/anime/settings', options),
-      ]) : [{ subscriptions: [] }, { episodes: [] }, null];
+        api(query('/api/v1/anime/episodes',{state:'archived',watch:'in_progress',limit:6,offset:0}),options),
+      ]) : [{ subscriptions: [] }, { episodes: [] }, null, {episodes:[]}];
       if (disposed || current !== generation) return;
       data.status = status;
       data.settings = settings;
       data.subscriptions = subscriptions.subscriptions || [];
       data.episodes = episodes.episodes || [];
+      data.continueWatching = continueWatching.episodes || [];
       data.error = '';
     } catch (error) {
       if (!disposed && current === generation && error.name !== 'AbortError') data.error = error.message;

@@ -643,3 +643,47 @@ func TestStateRestoreCannotResurrectPreVaultAlbumMetadata(t *testing.T) {
 		t.Fatal("refusal consumed a checkpoint", e)
 	}
 }
+
+func TestStatePackageKeepsLinksAndHistoryButExcludesWebDAVCredentials(t *testing.T) {
+	ctx := context.Background()
+	layout, packet := fixture(t)
+	apps := []byte(`[{"id":"video","name":"Video","url":"http://{host}:8096/","icon":"play","color":"blue"}]`)
+	history := []byte(`[]`)
+	if e := os.WriteFile(layout.targets()["desktop-apps"], apps, 0600); e != nil {
+		t.Fatal(e)
+	}
+	if e := os.WriteFile(layout.targets()["webdav-history"], history, 0600); e != nil {
+		t.Fatal(e)
+	}
+	secretDir := filepath.Join(layout.State, ".nasctl-webdav")
+	if e := os.Mkdir(secretDir, 0700); e != nil {
+		t.Fatal(e)
+	}
+	secret := []byte(`{"password":"generated-private-webdav-login"}`)
+	secretPath := filepath.Join(secretDir, "connection.json")
+	if e := os.WriteFile(secretPath, secret, 0600); e != nil {
+		t.Fatal(e)
+	}
+	result, e := Create(ctx, layout, packet, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	manifest, e := os.ReadFile(filepath.Join(packet, "manifest.json"))
+	if e != nil || bytes.Contains(manifest, []byte("webdav-connection")) || !bytes.Contains(manifest, []byte("desktop-apps")) || !bytes.Contains(manifest, []byte("webdav-history")) {
+		t.Fatal("unexpected package contents", e)
+	}
+	if e = os.WriteFile(layout.targets()["desktop-apps"], []byte(`[]`), 0600); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = Restore(ctx, layout, packet, result.ManifestSHA256, nil); e != nil {
+		t.Fatal(e)
+	}
+	restored, e := os.ReadFile(layout.targets()["desktop-apps"])
+	if e != nil || !bytes.Equal(restored, apps) {
+		t.Fatal("application links not restored", e)
+	}
+	private, e := os.ReadFile(secretPath)
+	if e != nil || !bytes.Equal(private, secret) {
+		t.Fatal("state restore touched excluded credentials", e)
+	}
+}

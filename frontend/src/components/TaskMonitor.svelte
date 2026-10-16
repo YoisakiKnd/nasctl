@@ -18,7 +18,7 @@
       if (disposed || current !== generation) return;
       job = data.job; detail = data.events?.filter((event) => event.to === 'running' && event.note).at(-1)?.note || ''; error = ''; onupdate(data);
       if (detail.startsWith('{')) {
-        try {const note=JSON.parse(detail);if(note.kind==='files.batch'&&note.result)detail=`完成 ${note.result.completed} 项，失败 ${note.result.failed} 项，未开始 ${note.result.not_started} 项。逐项结果已保存到任务记录。`;else if(note.kind==='backup.result')detail='备份任务结果已保存，可在任务中心重新查看。';}catch{/* Keep a plain task note. */}
+        try {const note=JSON.parse(detail);if(note.kind==='files.batch'&&note.result)detail=`完成 ${note.result.completed} 项，失败 ${note.result.failed} 项，未开始 ${note.result.not_started} 项。逐项结果已保存到任务记录。`;else if(note.kind==='webdav.result')detail='WebDAV 备份结果已保存。';else if(note.kind==='backup.result')detail='备份任务结果已保存，可在任务中心重新查看。';}catch{/* Keep a plain task note. */}
       }
       if (active(job.state)) timer = setTimeout(refresh,1500);
       else if (!settled) { settled = true; onsettled(job); }
@@ -39,7 +39,7 @@
   });
 </script>
 <div class="task-monitor" role="status">
-  {#if job}<div class="button-group"><strong>{job.op}</strong><span class="badge">{jobLabels[job.state] || job.state}</span>{#if job.cancellable && !stopping}<button class="text-button" onclick={() => confirming = !confirming}>停止任务</button>{/if}</div>
+  {#if job}<div class="button-group"><strong>{({'backup.webdav.run':'上传备份','backup.webdav.restore':'恢复备份','backup.webdav.retry':'重试上传'})[job.op]||job.op}</strong><span class="badge">{jobLabels[job.state] || job.state}</span>{#if job.cancellable && !stopping}<button class="text-button" onclick={() => confirming = !confirming}>停止任务</button>{/if}</div>
     {#if job.unit}<p class="field-help">已处理 {amount(job.progress)}{job.total > 0 ? ' / ' + amount(job.total) : ' · 总量待完成后确认'}</p>{#if job.total > 0}<progress max={job.total} value={job.progress} aria-label="任务进度"></progress>{/if}{/if}
     {#if detail}<p class="field-help task-detail">{detail}</p>{/if}
     {#if job.error}<p class="inline-error">{job.error}</p>{/if}

@@ -499,6 +499,20 @@ jobs:
           done
           test "$ready" = 1
           node scripts/uitest/backup.mjs http://127.0.0.1:18104
+          go build -o /tmp/nasctl-dav-fixture ./scripts/uitest/serve-webdav
+          /tmp/nasctl-dav-fixture --fixture-only --root /tmp/nasctl-ci-webdav --port 18116 > /tmp/nasctl-ci-webdav.log 2>&1 &
+          dav_pid=$!
+          trap 'kill "$backup_pid" "$dav_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for i in $(seq 1 50); do
+            if curl -sf -o /dev/null -u fixture:generated-webdav-fixture-password -X PROPFIND -H 'Depth: 0' http://127.0.0.1:18116/dav/; then
+              ready=1
+              break
+            fi
+            sleep 0.2
+          done
+          test "$ready" = 1
+          node scripts/uitest/everyday.mjs http://127.0.0.1:18104 http://127.0.0.1:18116/dav/ /tmp/nasctl-ci-webdav
 
       - name: Unified settings workflow with generated private data
         run: |

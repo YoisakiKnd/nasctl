@@ -5,8 +5,10 @@
   import Icon from '../components/Icon.svelte';
   import Dialog from '../components/Dialog.svelte';
   import TaskMonitor from '../components/TaskMonitor.svelte';
+  import WebDAVBackup from '../components/WebDAVBackup.svelte';
   import BackupResult from '../components/BackupResult.svelte';
   let {readOnly=false}=$props();
+  let section=$state('webdav');
   let settings=$state({plans:[],digests:{},busy:false}),roots=$state([]),limits=$state({copy_max_entries:10000,copy_max_bytes:8*1024**3});
   let loading=$state(true),error=$state(''),historyError=$state(''),message=$state(''),historyRoot=$state(''),history=$state({snapshots:[],incomplete:[]});
   let modal=$state(null),draft=$state(null),pending=$state(false),dialogError=$state(''),confirmation=$state(''),toRoot=$state(''),destination=$state('');
@@ -69,7 +71,8 @@
   }
   onMount(()=>{load();return()=>{disposed=true;request?.abort();historyRequest?.abort();submitRequest?.abort();};});
 </script>
-<header class="page-heading"><div><p class="eyebrow">本地文件保护</p><h1>备份</h1><p class="muted">为重要文件保留一份可校验的副本。</p></div><button class="button secondary" disabled={loading} onclick={load}><Icon name="refresh" size={16}/>刷新</button></header>
+<header class="page-heading backup-heading"><div><h1>备份</h1><p class="muted">给珍贵的文件，多一份安心。</p></div><nav class="backup-tabs" aria-label="备份位置"><button class:active={section==='webdav'} onclick={()=>section='webdav'}><Icon name="cloud" size={18}/>WebDAV</button><button class:active={section==='local'} onclick={()=>section='local'}><Icon name="disk" size={18}/>本地副本</button></nav></header>
+{#if section==='webdav'}<WebDAVBackup {readOnly}/>{:else}
 {#if error}<p class="notice error" role="alert">{error}<button class="text-button" onclick={load}>重试</button></p>{/if}
 {#if message}<p class="notice success" role="status">{message}</p>{/if}
 {#if task}<section class="panel task-panel"><TaskMonitor id={task} onupdate={updateTask} onsettled={load}/>{#if result}<BackupResult {result} operation={taskOperation} state={taskState}/>{/if}<a class="text-button" href="#jobs">在任务中心查看记录</a></section>{/if}
@@ -102,3 +105,5 @@
   {#if dialogError}<p class="notice error" role="alert">{dialogError}</p>{/if}
   <footer class="dialog-footer"><button class="button secondary" type="button" disabled={pending} onclick={close}>关闭</button><button class="button primary" type="submit" disabled={pending||readOnly||(modal.kind==='delete'||modal.kind==='cleanup')&&confirmation!==(typeof modal.item==='string'?modal.item:modal.item.id)}>{pending?'正在处理…':'确认'+name(modal.kind)}</button></footer>
 </form></Dialog>{/if}
+
+{/if}

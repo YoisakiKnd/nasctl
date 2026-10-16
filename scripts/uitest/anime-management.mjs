@@ -9,7 +9,7 @@ const dom=new JSDOM(await(await request('/')).text(),{url:base+'/#media',runScri
 const w=dom.window,d=w.document,delay=(ms)=>new Promise((resolve)=>setTimeout(resolve,ms));
 const check=(ok,label)=>{if(!ok)throw new Error(label);console.log('ok:',label);};
 async function wait(test,label){const until=Date.now()+7000;while(Date.now()<until){if(test())return;await delay(25);}throw new Error('timed out: '+label);}
-const button=(label,scope=d)=>[...scope.querySelectorAll('button')].find((node)=>node.textContent.trim()===label);
+const button=(label,scope=d)=>[...scope.querySelectorAll('button')].find((node)=>(node.textContent.trim()===label||node.getAttribute('aria-label')===label));
 const card=(name)=>[...d.querySelectorAll('.subscription-card')].find((node)=>node.querySelector('h2')?.textContent===name);
 function input(selector,value){const node=d.querySelector(selector);check(node,'input '+selector);node.value=value;node.dispatchEvent(new w.Event('input',{bubbles:true}));}
 function select(selector,value){const node=d.querySelector(selector);check(node,'select '+selector);node.value=value;node.dispatchEvent(new w.Event('change',{bubbles:true}));}
@@ -32,7 +32,7 @@ w.fetch=async(path,options={})=>{
 const fixture='Anime management '+Date.now();
 try{
   w.eval(await(await request('/app.js')).text());
-  await wait(()=>button('添加订阅')&&!button('添加订阅').disabled,'anime configured');button('添加订阅').click();
+  await wait(()=>button('添加订阅')&&!button('添加订阅').disabled,'anime configured');check(!d.querySelector('.anime-view .stat-strip')&&!button('连接与调度'),'daily shelf hides administrative statistics and settings');button('管理追番').click();await delay(0);check(d.querySelector('.anime-view .stat-strip'),'management view exposes operational controls');button('添加订阅').click();
   await wait(()=>d.querySelector('dialog form'),'subscription form');
   input('input[name="title"]',fixture);input('input[name="feed_url"]','https://example.com/fixture.rss');
   input('input[name="include"]','Original.*1080p');
