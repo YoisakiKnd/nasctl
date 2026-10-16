@@ -29,6 +29,15 @@ MemoryAccounting=yes
 MemoryHigh=192M
 MemoryMax=256M
 
+# The Go runtime does not read the cgroup ceiling. Without a soft limit its
+# garbage collector only paces itself by heap growth (GOGC=100), so a burst can
+# run the heap up toward MemoryHigh before it collects. GOMEMLIMIT makes the
+# collector work harder as the heap nears 96 MiB instead. It is soft: a real
+# need above it still succeeds, and the cgroup remains the hard boundary.
+# `nasctl album` task processes inherit it, which keeps the decoder's heap well
+# under its own 128 MiB ceiling. Tune it with MemoryHigh after measuring.
+Environment=GOMEMLIMIT=96MiB
+
 # NAS moves itself to a supervisor child before enabling memory delegation.
 # The gated album supervisor starts in a sibling task group, then establishes
 # its own decoder group. No other service's cgroup is changed.

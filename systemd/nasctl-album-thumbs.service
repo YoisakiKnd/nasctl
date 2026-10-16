@@ -41,6 +41,8 @@ SuccessExitStatus=0
 MemoryAccounting=yes
 MemoryHigh=96M
 MemoryMax=128M
+# Soft Go heap limit under the cgroup ceiling; see nasctl-web.service.
+Environment=GOMEMLIMIT=72MiB
 
 # Rotation between the two directions is deliberate: this is background work.
 CPUWeight=20

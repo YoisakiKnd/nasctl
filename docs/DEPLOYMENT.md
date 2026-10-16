@@ -30,7 +30,7 @@ cd nasctl-linux-arm64
 sha256sum -c SHA256SUMS
 ```
 
-包内含匹配的两个程序、配置样例、systemd 单元和部署说明。开发机 Linux 可通过
+包内含 nasctl 程序、配置样例、systemd 单元和部署说明。开发机 Linux 可通过
 `bash scripts/package-linux.sh amd64|arm64|armv7` 生成相同结构；此打包脚本需要 GNU tar、
 readelf、file 与 sha256sum，目标 NAS 日常运行不需要这些构建工具。
 
@@ -88,6 +88,9 @@ Linux 缩略图要求 cgroup v2 的 memory controller 和本服务的 `Delegate=
 解码器上限为 128 MiB，外层单次处理组增加 64 MiB 的监督预算；整个单元暂定
 MemoryHigh=192M、MemoryMax=256M，包含 NAS 与子进程。**这不是实际 RAM 用量测量。**
 若本机配置提高了解码预算，需核对单元总上限与设备余量；界面不会替你关闭强制隔离。
+单元还设置 `GOMEMLIMIT=96MiB`：Go 运行时不读取 cgroup 上限，这个软上限让垃圾回收在堆
+接近 96 MiB 时提前工作，`nasctl album` 子进程也会继承。它不是硬限制，调整 MemoryHigh
+时一并按实测调整。
 
 只读 `doctor` 不建立新 cgroup，最终隔离须用少量受限任务的资源报告确认。浏览页面
 只读索引与缓存，缺失缩略图不触发解码。Linux 缺少委派时任务明确拒绝；macOS 开发

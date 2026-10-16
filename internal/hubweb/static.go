@@ -1,11 +1,15 @@
 package hubweb
 
 import (
+	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"embed"
-	"fmt"
+	"encoding/hex"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 )
 
 // The front end is embedded in the binary. There is no front-end toolchain on the
@@ -16,20 +20,63 @@ import (
 //go:embed web/index.html web/app.css web/app.js
 var assets embed.FS
 
-// assetInfo describes one embedded file.
-type assetInfo struct {
+// staticAsset is one embedded file with validators computed once at startup.
+// The gzip variant is built on first use and kept: it is a fraction of the
+// original's size, and compressing on every request would cost CPU the NAS
+// needs for other work.
+type staticAsset struct {
 	path        string
 	contentType string
+	body        []byte
+	hash        string // hex SHA-256 of body
+	etag        string
+
+	gzipOnce sync.Once
+	gzipBody []byte // nil when compression would not help
 }
 
 // assetTable maps a request path to an embedded file. The table is explicit
 // rather than a directory listing so that adding a file to the web directory
 // cannot accidentally publish it.
-var assetTable = map[string]assetInfo{
-	"/":           {"web/index.html", "text/html; charset=utf-8"},
-	"/index.html": {"web/index.html", "text/html; charset=utf-8"},
-	"/app.css":    {"web/app.css", "text/css; charset=utf-8"},
-	"/app.js":     {"web/app.js", "text/javascript; charset=utf-8"},
+var assetTable = map[string]*staticAsset{
+	"/":           {path: "web/index.html", contentType: "text/html; charset=utf-8"},
+	"/index.html": {path: "web/index.html", contentType: "text/html; charset=utf-8"},
+	"/app.css":    {path: "web/app.css", contentType: "text/css; charset=utf-8"},
+	"/app.js":     {path: "web/app.js", contentType: "text/javascript; charset=utf-8"},
+}
+
+func init() {
+	for key, a := range assetTable {
+		body, err := assets.ReadFile(a.path)
+		if err != nil {
+			panic("hubweb: embedded asset missing for " + key + ": " + err.Error())
+		}
+		sum := sha256.Sum256(body)
+		a.body, a.hash = body, hex.EncodeToString(sum[:])
+		a.etag = `"` + a.hash + `"`
+	}
+}
+
+// gzipped returns the compressed body, or nil when the client should get the
+// original.
+func (a *staticAsset) gzipped() []byte {
+	a.gzipOnce.Do(func() {
+		if len(a.body) < 1024 {
+			return
+		}
+		var buf bytes.Buffer
+		zw, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+		if err != nil {
+			return
+		}
+		if _, err = zw.Write(a.body); err != nil || zw.Close() != nil {
+			return
+		}
+		if buf.Len() < len(a.body) {
+			a.gzipBody = buf.Bytes()
+		}
+	})
+	return a.gzipBody
 }
 
 // handleIndex serves the application shell.
@@ -65,32 +112,63 @@ func looksLikeAsset(p string) bool {
 	return strings.Contains(last, ".")
 }
 
+// acceptsGzip reports whether the request accepts a gzip response, honouring
+// an explicit q=0 refusal.
+func acceptsGzip(r *http.Request) bool {
+	for _, part := range strings.Split(r.Header.Get("Accept-Encoding"), ",") {
+		name, params, _ := strings.Cut(strings.TrimSpace(part), ";")
+		if !strings.EqualFold(strings.TrimSpace(name), "gzip") {
+			continue
+		}
+		q := strings.TrimSpace(params)
+		if v, ok := strings.CutPrefix(q, "q="); ok {
+			if f, err := strconv.ParseFloat(v, 64); err == nil && f == 0 {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
 // serveAsset writes an embedded asset.
 func (s *Server) serveAsset(w http.ResponseWriter, r *http.Request, key string) {
-	info, ok := assetTable[key]
+	a, ok := assetTable[key]
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	body, err := assets.ReadFile(info.path)
-	if err != nil {
-		s.fail(w, http.StatusInternalServerError, "internal_error", err)
-		return
+	h := w.Header()
+	h.Set("Content-Type", a.contentType)
+	h.Set("Vary", "Accept-Encoding")
+	// Embedded files have zero modification times, so a timestamp validator
+	// would keep an older binary's UI forever; content hashes are used instead.
+	// The shell always revalidates. The build stamps the script and stylesheet
+	// URLs with ?v=<first 12 hex of their SHA-256>; a request carrying the
+	// matching stamp names immutable content and may be cached for a year,
+	// while an unstamped or stale URL still revalidates.
+	if v := r.URL.Query().Get("v"); key != "/" && key != "/index.html" && len(v) == 12 && strings.HasPrefix(a.hash, v) {
+		h.Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		h.Set("Cache-Control", "no-cache")
 	}
-	w.Header().Set("Content-Type", info.contentType)
-	// Embedded files have zero modification times. A timestamp validator would
-	// incorrectly keep an older binary's UI forever. Revalidate all three assets
-	// by content so an upgrade also picks up the matching script and stylesheet.
-	w.Header().Set("Cache-Control", "no-cache")
-	etag := fmt.Sprintf(`"%x"`, sha256.Sum256(body))
-	w.Header().Set("ETag", etag)
+	body, etag := a.body, a.etag
+	if acceptsGzip(r) {
+		if gz := a.gzipped(); gz != nil {
+			body, etag = gz, `"`+a.hash+`-gz"`
+			h.Set("Content-Encoding", "gzip")
+		}
+	}
+	h.Set("ETag", etag)
 	for _, tag := range strings.Split(r.Header.Get("If-None-Match"), ",") {
-		if strings.TrimPrefix(strings.TrimSpace(tag), "W/") == etag || strings.TrimSpace(tag) == "*" {
+		tag = strings.TrimSpace(tag)
+		if strings.TrimPrefix(tag, "W/") == etag || tag == "*" {
+			h.Del("Content-Encoding")
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
 	}
-
+	h.Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(http.StatusOK)
 	if r.Method == http.MethodHead {
 		return
