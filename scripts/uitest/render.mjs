@@ -93,6 +93,8 @@ try {
     const subscriptionResponse = await fetch(base + '/api/v1/anime/subscriptions',{headers});
     const saved = (await subscriptionResponse.json()).subscriptions.find((sub) => sub.title === fixtureName);
     check(saved.start_episode === 5 && saved.end_episode === 12,'episode range is persisted by the real API');
+    click('button[aria-label="管理追番"]');
+    await wait(() => d.querySelector('.stat-strip'),'subscription management opens');
     const card = [...d.querySelectorAll('.subscription-card')].find((node) => node.textContent.includes(fixtureName));
     [...card.querySelectorAll('button')].find((node) => node.textContent.includes('编辑')).click();
     await wait(() => d.querySelector('dialog[open]'),'edit dialog opens');
@@ -104,7 +106,10 @@ try {
   await route('settings'); await wait(() => !text('.panel-heading .badge').includes('读取中'),'settings resolve');
   check(d.querySelector('.mode-options'),'mode controls are preserved');
   await route('album'); check(d.querySelector('.album-view'),'integrated album entry is preserved');
-  await route('backup'); await wait(()=>d.querySelector('.backup-plans')&&d.querySelector('.backup-history'),'native backup view'); check(!text('.app-window.active .content').includes('尚未接入'),'native backup plan/history replaces placeholder');
+  await route('backup');
+  await wait(()=>d.querySelector('.cloud-backup'),'WebDAV backup is the default view');
+  [...d.querySelectorAll('.app-window.active button')].find(node=>node.textContent.trim()==='本地副本').click();
+  await wait(()=>d.querySelector('.backup-plans')&&d.querySelector('.backup-history'),'native backup view'); check(!text('.app-window.active .content').includes('尚未接入'),'native backup plan/history replaces placeholder');
   const before = d.documentElement.dataset.theme;
   click('.topbar-actions button');
   await pause(50);

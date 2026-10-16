@@ -15,8 +15,11 @@ import (
 )
 
 func (s *Server) handleApps(w http.ResponseWriter, r *http.Request) {
-	if principalOf(r.Context()).Kind!=domain.PrincipalUser{writeError(w,403,"denied","桌面应用需要 NAS 成员身份");return}
- if s.Apps == nil {
+	if principalOf(r.Context()).Kind != domain.PrincipalUser {
+		writeError(w, 403, "denied", "桌面应用需要 NAS 成员身份")
+		return
+	}
+	if s.Apps == nil {
 		if r.Method != "GET" {
 			writeError(w, 503, "not_configured", "桌面应用设置尚未初始化")
 			return
