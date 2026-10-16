@@ -6,6 +6,7 @@ from pathlib import Path
 parser = argparse.ArgumentParser()
 parser.add_argument("root", type=Path)
 parser.add_argument("--fixture-only", action="store_true", required=True)
+parser.add_argument("--anime", action="store_true")
 args = parser.parse_args()
 base = args.root.resolve()
 if base.exists() and any(base.iterdir()):
@@ -40,3 +41,8 @@ path={q(base / "restored")}
 writable=true
 ''')
 print(base)
+if args.anime:
+    for name in ["anime-downloads", "anime-library"]:
+        (base / name).mkdir()
+    with (base / "config.toml").open("a") as config:
+        config.write(f'\n[hub.anime]\nenabled=true\ndownload_dir={q(base / "anime-downloads")}\nlibrary_dir={q(base / "anime-library")}\n')

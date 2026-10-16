@@ -297,6 +297,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/anime/subscriptions/{id}/archive", s.handleAnimeSubscriptionState)
 	mux.HandleFunc("GET /api/v1/anime/metadata/search", s.handleAnimeMetadataSearch)
 	mux.HandleFunc("GET /api/v1/anime/metadata/series/{id}", s.handleAnimeMetadataDetails)
+	mux.HandleFunc("GET /api/v1/anime/sources/search", s.handleAnimeSources)
+	mux.HandleFunc("GET /api/v1/anime/sources/mikan/{id}", s.handleMikanSource)
 	mux.HandleFunc("GET /api/v1/anime/episodes", s.handleAnimeEpisodes)
 	mux.HandleFunc("POST /api/v1/anime/refresh", s.handleAnimeRefresh)
 	mux.HandleFunc("POST /api/v1/anime/episodes/{id}/queue", s.handleAnimeQueue)
@@ -325,7 +327,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		// No external origins at all: the console loads nothing from the
 		// network, so a policy that forbids it cannot break a legitimate page.
 		w.Header().Set("Content-Security-Policy",
-			"default-src 'self'; img-src 'self' data: blob:; media-src 'self'; "+
+			"default-src 'self'; img-src 'self' data: blob: https://lain.bgm.tv https://mikanani.me; media-src 'self'; "+
 				"script-src 'self'; style-src 'self'; connect-src 'self'; "+
 				"font-src 'self'; object-src 'none'; base-uri 'none'; "+
 				"form-action 'none'; frame-ancestors 'none'")

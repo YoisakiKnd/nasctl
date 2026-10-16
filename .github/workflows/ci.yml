@@ -485,7 +485,7 @@ jobs:
 
       - name: Native local backup, verified restore, conflicts and exact-ID cleanup
         run: |
-          python3 scripts/uitest/seed-backup.py /tmp/nasctl-ci-backup --fixture-only
+          python3 scripts/uitest/seed-backup.py /tmp/nasctl-ci-backup --fixture-only --anime
           /tmp/nasctl --config /tmp/nasctl-ci-backup/config.toml serve > /tmp/backup-console.log 2>&1 &
           backup_pid=$!
           trap 'kill "$backup_pid" 2>/dev/null || true' EXIT
@@ -513,6 +513,7 @@ jobs:
           done
           test "$ready" = 1
           node scripts/uitest/everyday.mjs http://127.0.0.1:18104 http://127.0.0.1:18116/dav/ /tmp/nasctl-ci-webdav
+          node scripts/uitest/anime-sources.mjs http://127.0.0.1:18104
 
       - name: Unified settings workflow with generated private data
         run: |
