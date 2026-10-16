@@ -30,6 +30,10 @@ func TestRemoteFailuresNameTheStepAndStatus(t *testing.T) {
 					t.Errorf("detail lacks %q:\n%s", want, detail)
 				}
 			}
+			records := s.Settings().Records
+			if len(records) == 0 || !strings.HasPrefix(records[0].Error, "WebDAV 改为正式名称：MOVE 返回 HTTP 503\n步骤：") {
+				t.Fatalf("failed record does not carry the remote detail: %+v", records)
+			}
 			if strings.Contains(detail, password) || strings.Contains(e.Error(), password) {
 				t.Fatal("credential leaked into the error")
 			}

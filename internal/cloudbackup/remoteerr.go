@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // RemoteError explains which WebDAV exchange failed and what the server said,
@@ -175,4 +176,23 @@ func Explain(err error) (summary, detail string, ok bool) {
 		return "", "", false
 	}
 	return re.Summary(), re.Detail(), true
+}
+
+// recordError is what a failed backup record shows: the remote step and its
+// detail when the failure came from the WebDAV server, the fallback otherwise.
+// It stays under 2 KiB so 128 records fit the history file's budget.
+func recordError(fallback string, err error) string {
+	summary, detail, ok := Explain(err)
+	if !ok {
+		return fallback
+	}
+	text := "WebDAV " + summary + "\n" + detail
+	if len(text) > 2000 {
+		cut := 2000
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		text = text[:cut] + "…"
+	}
+	return text
 }

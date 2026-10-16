@@ -77,7 +77,7 @@ func (s *Store) Run(ctx context.Context, req RunRequest, progress func(Progress)
 	defer func() {
 		if err != nil {
 			record.State = "failed"
-			record.Error = "备份未完成，原文件保留。请检查连接、空间和备份范围后重试。"
+			record.Error = recordError("备份未完成，原文件保留。请检查连接、空间和备份范围后重试。", err)
 			record.Retryable = record.Input.Mode == "direct" || len(record.SHA256) == 64
 			_ = s.update(record)
 		}
@@ -421,7 +421,7 @@ func (s *Store) Retry(ctx context.Context, id string, progress func(Progress)) (
 		record.Retryable = false
 	} else {
 		record.State = "failed"
-		record.Error = "重试未完成，请检查连接和备份范围。"
+		record.Error = recordError("重试未完成，请检查连接和备份范围。", err)
 	}
 	saveErr := s.update(record)
 	if err == nil {
