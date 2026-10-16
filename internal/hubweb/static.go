@@ -17,7 +17,7 @@ import (
 // is why the console needs no Node.js, no bundler and no asset directory on the
 // NAS.
 //
-//go:embed web/index.html web/app.css web/app.js
+//go:embed web/index.html web/app.css web/app.js web/manifest.webmanifest web/icon-192.png web/icon-512.png web/icon-maskable.png web/apple-touch-icon.png
 var assets embed.FS
 
 // staticAsset is one embedded file with validators computed once at startup.
@@ -43,6 +43,13 @@ var assetTable = map[string]*staticAsset{
 	"/index.html": {path: "web/index.html", contentType: "text/html; charset=utf-8"},
 	"/app.css":    {path: "web/app.css", contentType: "text/css; charset=utf-8"},
 	"/app.js":     {path: "web/app.js", contentType: "text/javascript; charset=utf-8"},
+	// Installable web app: the manifest and icons are public so the browser
+	// can fetch them without credentials, and contain nothing private.
+	"/manifest.webmanifest": {path: "web/manifest.webmanifest", contentType: "application/manifest+json"},
+	"/icon-192.png":         {path: "web/icon-192.png", contentType: "image/png"},
+	"/icon-512.png":         {path: "web/icon-512.png", contentType: "image/png"},
+	"/icon-maskable.png":    {path: "web/icon-maskable.png", contentType: "image/png"},
+	"/apple-touch-icon.png": {path: "web/apple-touch-icon.png", contentType: "image/png"},
 }
 
 func init() {

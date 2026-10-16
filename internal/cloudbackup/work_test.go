@@ -87,6 +87,8 @@ func (d *davFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(400)
 			return
 		}
+		// Like real servers, a collection's trailing slash names the same path.
+		dest.Path = strings.TrimSuffix(dest.Path, "/")
 		if d.dirs[dest.Path] || d.files[dest.Path] != nil {
 			w.WriteHeader(412)
 			return

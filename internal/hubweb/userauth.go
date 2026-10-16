@@ -3,6 +3,7 @@ package hubweb
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"net/http"
 	"time"
 
@@ -19,8 +20,8 @@ func (s *Server) accountStatus(ctx context.Context) (accounts.Snapshot, error) {
 func accountPrincipal(u accounts.User) domain.Principal {
 	return domain.Principal{Kind: domain.PrincipalUser, Name: u.Username, UserID: u.ID, Role: u.Role}
 }
-func (a *browserAuth) createUser(now time.Time, u accounts.User) (string, error) {
-	return a.createSession(now, &userSession{ID: u.ID, Epoch: u.Epoch})
+func (a *browserAuth) createUser(now time.Time, u accounts.User, remember bool) (string, error) {
+	return a.createSession(now, &userSession{ID: u.ID, Epoch: u.Epoch}, remember)
 }
 func (s *Server) browserPrincipal(r *http.Request) (domain.Principal, bool) {
 	c, e := r.Cookie(sessionCookie)
@@ -32,8 +33,7 @@ func (s *Server) browserPrincipal(r *http.Request) (domain.Principal, bool) {
 	expires, ok := s.auth.sessions[key]
 	user, named := s.auth.users[key]
 	if !ok || !time.Now().Before(expires) {
-		delete(s.auth.sessions, key)
-		delete(s.auth.users, key)
+		s.auth.drop(key)
 		s.auth.mu.Unlock()
 		return domain.Principal{}, false
 	}
@@ -44,6 +44,13 @@ func (s *Server) browserPrincipal(r *http.Request) (domain.Principal, bool) {
 		}
 		current, e := s.Accounts.Lookup(r.Context(), user.ID)
 		if e != nil || current.Epoch != user.Epoch {
+			// A changed or removed account ends the session for good,
+			// including a kept one.
+			if errors.Is(e, accounts.ErrCredential) || e == nil {
+				s.auth.mu.Lock()
+				s.auth.drop(key)
+				s.auth.mu.Unlock()
+			}
 			return domain.Principal{}, false
 		}
 		return accountPrincipal(current), true

@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from './ErrorNotice.svelte';
   import { onMount } from 'svelte';
   import { api,json } from '../lib/api.js';
   import { time } from '../lib/format.js';
@@ -25,7 +26,7 @@
 </script>
 <section class="panel settings-section" aria-label="账号与权限">
   <div class="panel-heading"><div><h2>账号与权限</h2><p class="muted">为设备成员设置登录身份和操作范围。</p></div><button class="button secondary small" disabled={loading||pending} onclick={load}>刷新账号</button></div>
-  {#if error&&!dialog}<p class="notice error" role="alert">{error}</p>{/if}{#if message}<p class="notice success" role="status">{message}</p>{/if}
+  {#if error&&!dialog}<ErrorNotice message={error}/>{/if}{#if message}<p class="notice success" role="status">{message}</p>{/if}
   {#if snapshot?.setup_requires_config}<div class="notice"><strong>先启用持久登录保护</strong><p>在 NAS 本机的基础配置中设置 <code>[hub] setup=true</code>，然后重启服务。这样即使状态盘丢失，设备也会要求重新验证管理员。</p><p>重启后，在本机运行 <code>nasctl users setup-code</code> 获取首次设置密钥。</p></div>
   {:else if snapshot&&!snapshot.enabled}<AccountSetup embedded oncomplete={setupComplete}/>
   {:else if snapshot}
@@ -46,6 +47,6 @@
     <p class="field-help">保存角色、停用状态或密码后，该账号已有会话会失效；至少保留一个已启用的管理员。</p>
     <div class="dialog-footer"><button class="button secondary" type="button" onclick={closeDialog}>返回</button><button class="button primary" type="submit" disabled={pending||!username||(!dialog.user&&!password)||!validPassword||password!==again}>{pending?'正在保存…':'确认保存账号'}</button></div>
   </fieldset></form>{/if}
-  {#if error}<p class="notice error" role="alert">{error}</p>{/if}
+  {#if error}<ErrorNotice message={error}/>{/if}
   {#if discard}<div class="notice"><p>账号修改尚未保存，关闭后会放弃当前输入。</p><div class="button-row"><button class="button secondary" onclick={()=>discard=false}>继续编辑</button><button class="button danger" onclick={clearDialog}>放弃修改</button></div></div>{/if}
 </Dialog>{/if}

@@ -35,7 +35,15 @@
   标题下方，底边留给手机标签栏。
 - 颜色、圆角和尺寸集中在 `styles.css` 顶部的 token 中。没有保存主题时样式表直接跟随
   `prefers-color-scheme`，首屏不会闪白；“我的”页面可选跟随系统／浅色／深色。
-- 系统字体、内联 SVG 图标，不引入 UI 库、在线字体、背景图或 backdrop-filter。
+- 系统字体、内联 SVG 图标，不使用在线字体、背景图或 backdrop-filter。
+- 交互组件使用 [Bits UI](https://bits-ui.com)（Svelte 5 无样式组件库，版本固定在
+  `package.json`）：它只提供键盘、焦点和无障碍行为，外观仍由 `styles.css` 的 token 决定，
+  按需打包，不引入 Tailwind。目前用于可展开的错误详情（Collapsible）和头像账号菜单
+  （DropdownMenu）。菜单类组件自带浮层定位与焦点管理，约增加 28 KB（gzip）脚本；新增
+  组件时先确认这笔开销值得。
+- 错误统一用 `ErrorNotice`：第一行是摘要，服务端提供的技术细节（步骤、HTTP 状态、服务器
+  回复、错误代码）在“查看详情”中展开，可复制。内部错误原文只返回给设备管理员。
+- 可以“添加到主屏幕”：提供 `manifest.webmanifest` 与 192/512/maskable 图标，以独立窗口打开。
 
 | Token | 浅色 | 深色 |
 | --- | --- | --- |

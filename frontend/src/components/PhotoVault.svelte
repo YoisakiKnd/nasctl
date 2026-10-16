@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from './ErrorNotice.svelte';
   import { getContext, onMount } from 'svelte';
   import { api, json, query } from '../lib/api.js';
   import Icon from './Icon.svelte';
@@ -58,7 +59,7 @@
 </script>
 <div class="photo-library photo-vault">
   <div class="photo-library-heading"><div><h1><Icon name="lock" size={24}/>照片保险箱</h1><p class="muted">只属于你的私密回忆</p></div>{#if state?.unlocked}<button class="button secondary small" onclick={lock}>锁定</button>{/if}</div>
-  {#if error}<p class="notice error" role="alert">{error}</p>{/if}
+  {#if error}<ErrorNotice message={error}/>{/if}
   {#if message}<p class="notice success" role="status">{message}</p>{/if}
   {#if !state}<p role="status">正在读取保险箱…</p>
   {:else if !state.available}<section class="empty-state"><Icon name="lock" size={42}/><h2>保险箱暂不可用</h2><p>请先启用本地相册。</p></section>

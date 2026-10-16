@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from './ErrorNotice.svelte';
   import { api,json } from '../lib/api.js';
   let { oncomplete, embedded=false }=$props();
   let code=$state(''),username=$state(''),display=$state(''),password=$state(''),again=$state(''),confirmed=$state(false),pending=$state(false),error=$state('');
@@ -15,7 +16,7 @@
     <label>再次输入密码<input aria-label="确认管理员密码" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required bind:value={again}/></label>
     {#if again&&password!==again}<p class="field-help error-text">两次密码不一致。</p>{/if}
     <label class="checkbox"><input type="checkbox" bind:checked={confirmed}/>创建管理员并启用账号登录。此账号可以管理所有已配置的文件、媒体与设备设置。</label>
-    {#if error}<p class="notice error" role="alert">{error}</p>{/if}
+    {#if error}<ErrorNotice message={error}/>{/if}
     <button class="button primary" type="submit" disabled={pending||!confirmed||password!==again||!validPassword||!username||!code}>{pending?'正在创建管理员…':'创建管理员，进入 NAS'}</button>
   </fieldset></form>
 </section>

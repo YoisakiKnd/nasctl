@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from './ErrorNotice.svelte';
   import { api, json } from '../lib/api.js';
   import { bytes, time } from '../lib/format.js';
   import Dialog from './Dialog.svelte';
@@ -27,7 +28,7 @@
 <section class="panel settings-section metadata-backups">
   <div class="panel-heading"><h2>元数据旧版本</h2><button class="button secondary small" disabled={pending || taskRunning} onclick={load}>{pending ? '正在读取…' : items ? '刷新备份' : '查看元数据备份'}</button></div>
   <p class="field-help">替换 NFO 或封面前保存旧版本，视频和字幕保持原样。最多保留 1000 个版本、64 MiB；可先下载，再按需清理。</p>
-  {#if error && !confirming}<p class="notice error" role="alert">{error}</p>{/if}
+  {#if error && !confirming}<ErrorNotice message={error}/>{/if}
   {#if job}<TaskMonitor id={job} onsettled={() => {taskRunning = false; load(); onlibrarychange();}}/>{/if}
   {#if items}
     {#if !items.length}<p class="section-empty">暂无元数据旧版本。</p>{:else}
@@ -36,4 +37,4 @@
     {/if}
   {/if}
 </section>
-{#if confirming}<Dialog title={confirming.operation === 'restore' ? '恢复元数据版本' : '清理元数据备份'} onclose={() => {if (!pending) confirming = null;}}><p class="path">{confirming.item.path}</p><p>{confirming.operation === 'restore' ? '恢复这个版本，并保存当前文件为另一个备份。仅修改所选 NFO 或封面。' : '永久移除这个备份版本，无法恢复。当前媒体库文件保持原样，建议先下载保存。'}</p>{#if error}<p class="notice error" role="alert">{error}</p>{/if}<div class="dialog-footer"><button class="button secondary" disabled={pending} onclick={() => confirming = null}>取消</button><button class="button primary" disabled={pending} onclick={act}>{pending ? '正在处理…' : confirming.operation === 'restore' ? '确认恢复元数据' : '确认永久清理备份'}</button></div></Dialog>{/if}
+{#if confirming}<Dialog title={confirming.operation === 'restore' ? '恢复元数据版本' : '清理元数据备份'} onclose={() => {if (!pending) confirming = null;}}><p class="path">{confirming.item.path}</p><p>{confirming.operation === 'restore' ? '恢复这个版本，并保存当前文件为另一个备份。仅修改所选 NFO 或封面。' : '永久移除这个备份版本，无法恢复。当前媒体库文件保持原样，建议先下载保存。'}</p>{#if error}<ErrorNotice message={error}/>{/if}<div class="dialog-footer"><button class="button secondary" disabled={pending} onclick={() => confirming = null}>取消</button><button class="button primary" disabled={pending} onclick={act}>{pending ? '正在处理…' : confirming.operation === 'restore' ? '确认恢复元数据' : '确认永久清理备份'}</button></div></Dialog>{/if}

@@ -201,6 +201,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /", s.handleIndex)
 	mux.HandleFunc("GET /app.css", s.handleStatic)
 	mux.HandleFunc("GET /app.js", s.handleStatic)
+	mux.HandleFunc("GET /manifest.webmanifest", s.handleStatic)
+	mux.HandleFunc("GET /icon-192.png", s.handleStatic)
+	mux.HandleFunc("GET /icon-512.png", s.handleStatic)
+	mux.HandleFunc("GET /icon-maskable.png", s.handleStatic)
+	mux.HandleFunc("GET /apple-touch-icon.png", s.handleStatic)
 	mux.HandleFunc("GET /api/v1/auth/status", s.handleAuthStatus)
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
@@ -386,7 +391,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		}
 
 		start := time.Now()
-		sw := &statusWriter{ResponseWriter: w, code: http.StatusOK}
+		sw := &statusWriter{ResponseWriter: w, code: http.StatusOK, detail: p.DeviceAdmin()}
 		next.ServeHTTP(sw, r)
 		if s.Log != nil && r.URL.Path != "/api/v1/overview" {
 			s.Log.Debug("request", "method", r.Method, "path", r.URL.Path,
@@ -668,35 +673,64 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 func writeError(w http.ResponseWriter, status int, code, msg string) {
-	writeJSON(w, status, map[string]any{"error": code, "message": msg})
+	writeErrorDetail(w, status, code, msg, "")
+}
+
+// writeErrorDetail adds an optional technical explanation that the UI shows
+// behind an expandable "details" control.
+func writeErrorDetail(w http.ResponseWriter, status int, code, msg, detail string) {
+	body := map[string]any{"error": code, "message": msg}
+	if detail != "" {
+		body["detail"] = detail
+	}
+	writeJSON(w, status, body)
+}
+
+// detailAllowed reports whether internal error text may be shown to this
+// caller. Only device administrators see it: it can name paths on the NAS.
+func detailAllowed(w http.ResponseWriter) bool {
+	for {
+		switch v := w.(type) {
+		case *statusWriter:
+			return v.detail
+		case interface{ Unwrap() http.ResponseWriter }:
+			w = v.Unwrap()
+		default:
+			return false
+		}
+	}
 }
 
 func (s *Server) fail(w http.ResponseWriter, status int, code string, err error) {
 	if s.Log != nil {
 		s.Log.Error("request failed", "code", code, "error", err.Error())
 	}
-	// The internal error text is not echoed: it can contain a path, and the
-	// caller does not need it. It is logged instead.
-	writeError(w, status, code, userMessage(code))
+	// The internal error text can contain a path, so only a device
+	// administrator gets it, as an expandable detail; it is always logged.
+	detail := ""
+	if err != nil && detailAllowed(w) {
+		detail = domain.Redact(err.Error())
+	}
+	writeErrorDetail(w, status, code, userMessage(code), detail)
 }
 
 // userMessage maps an error code to text safe to show a caller.
 func userMessage(code string) string {
 	switch code {
 	case "no_such_root":
-		return "no storage root with that ID is configured"
+		return "没有这个存储目录，请刷新后重试"
 	case "outside_root":
-		return "that path is outside the storage root"
+		return "路径超出了存储目录范围"
 	case "not_found":
-		return "no such entry"
+		return "文件或目录不存在，可能已被移动或删除"
 	case "bad_request":
-		return "the request could not be understood"
+		return "请求参数无效，请刷新页面后重试"
 	case "state_error":
-		return "the console's state could not be read"
+		return "读取控制台状态失败，请稍后重试"
 	case "busy":
-		return "the console is busy; try again shortly"
+		return "设备正忙，请稍后重试"
 	default:
-		return "the request could not be completed"
+		return "操作没有完成，请稍后重试"
 	}
 }
 
@@ -760,9 +794,10 @@ func intParam(r *http.Request, name string, def int) int {
 // statusWriter records the status and size for the access log.
 type statusWriter struct {
 	http.ResponseWriter
-	code  int
-	n     int64
-	wrote bool
+	code   int
+	n      int64
+	wrote  bool
+	detail bool // the caller may see internal error details
 }
 
 func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }

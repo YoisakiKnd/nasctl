@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from './ErrorNotice.svelte';
   import { untrack, onDestroy } from 'svelte';
   import { api, json } from '../lib/api.js';
   import MetadataPicker from './MetadataPicker.svelte';
@@ -55,7 +56,7 @@
     <MetadataPicker {title} value={tmdb} {season} configured={metadataConfigured} disabled={pending} onselect={(id) => {tmdb = id; changed();}} onseason={(value) => {season = value; changed();}} onbusy={(value) => metadataBusy = value}/>
   </details>
   <div><button class="button secondary" type="button" onclick={previewRules} disabled={pending || previewing || !title.trim() || !feed.trim()}>{previewing ? '正在读取 RSS…' : '预览 RSS 匹配'}</button><p class="field-help">仅检查当前规则，不保存订阅或提交下载。</p></div>
-  {#if previewError}<p class="notice error" role="alert">{previewError}</p>{/if}
+  {#if previewError}<ErrorNotice message={previewError}/>{/if}
   {#if preview}<section class="feed-preview" aria-label="RSS 匹配预览"><p role="status">读取 {preview.scanned} 条 · 匹配 {preview.matched} 条 · 可发现 {preview.new} 集 · 已存在 {preview.existing} 条</p><ol>{#each preview.items as item}<li><strong>{item.title}</strong><span class:matched={item.matched}>{item.number ? '第 ' + item.number + ' 集 · ' : ''}{item.reason}</span></li>{/each}</ol>{#if preview.truncated}<p class="field-help">结果仅展示前 50 条，统计覆盖本次全部有效条目。</p>{/if}</section>{/if}
   <label class="check-row"><input name="enabled" type="checkbox" bind:checked={enabled} disabled={pending}/><span><strong>启用订阅</strong><small>关闭后暂停发现和核对剧集</small></span></label>
   <label class="check-row"><input name="auto_download" type="checkbox" bind:checked={auto} disabled={pending}/><span><strong>自动下载</strong><small>下载集数范围内的匹配单集，包括历史剧集</small></span></label>

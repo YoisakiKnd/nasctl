@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from '../components/ErrorNotice.svelte';
   import { onMount } from 'svelte';
   import { api,json,query } from '../lib/api.js';
   import { bytes,time } from '../lib/format.js';
@@ -73,7 +74,7 @@
 </script>
 <header class="page-heading backup-heading"><div><h1>备份</h1><p class="muted">给珍贵的文件，多一份安心。</p></div><nav class="backup-tabs" aria-label="备份位置"><button class:active={section==='webdav'} onclick={()=>section='webdav'}><Icon name="cloud" size={18}/>WebDAV</button><button class:active={section==='local'} onclick={()=>section='local'}><Icon name="disk" size={18}/>本地副本</button></nav></header>
 {#if section==='webdav'}<WebDAVBackup {readOnly}/>{:else}
-{#if error}<p class="notice error" role="alert">{error}<button class="text-button" onclick={load}>重试</button></p>{/if}
+{#if error}<ErrorNotice message={error} onretry={load}/>{/if}
 {#if message}<p class="notice success" role="status">{message}</p>{/if}
 {#if task}<section class="panel task-panel"><TaskMonitor id={task} onupdate={updateTask} onsettled={load}/>{#if result}<BackupResult {result} operation={taskOperation} state={taskState}/>{/if}<a class="text-button" href="#admin/jobs">在任务中心查看记录</a></section>{/if}
 <section class="panel backup-plans">
@@ -83,7 +84,7 @@
   {:else}<div class="backup-plan-grid">{#each settings.plans as plan (plan.id)}<article class="backup-plan"><div class="backup-plan-heading"><span class="app-icon amber"><Icon name="backup" size={22}/></span><div><h3>{plan.name}</h3><small class="muted">{plan.id}</small></div></div><dl><dt>原文件</dt><dd>{rootName(plan.root)} / {plan.path}</dd><dt>备份位置</dt><dd>{rootName(plan.to_root)}</dd><dt>单次预算</dt><dd>{plan.limit.toLocaleString()} 项 · {bytes(plan.max_bytes)} · {plan.max_runtime}</dd><dt>保留策略</dt><dd>最近 {plan.keep} 份，成功后清理旧版本</dd></dl><div class="button-group"><button class="button primary small" disabled={blocked} onclick={()=>open('run',plan)}>执行备份</button><button class="text-button" disabled={blocked} onclick={()=>edit(plan)}>编辑</button><button class="text-button" disabled={blocked} onclick={()=>open('remove',plan)}>移除计划</button></div></article>{/each}</div>{/if}
 </section>
 <section class="panel backup-history"><div class="panel-heading"><h2>备份版本</h2><select aria-label="备份历史存储目录" bind:value={historyRoot} onchange={loadHistory} disabled={running}>{#each roots as root}<option value={root.id} disabled={!root.available}>{root.label||root.id}</option>{/each}</select></div>
-  {#if historyError}<p class="notice error" role="alert">{historyError}<button class="text-button" onclick={loadHistory}>重试</button></p>{/if}
+  {#if historyError}<ErrorNotice message={historyError} onretry={loadHistory}/>{/if}
   {#if history.truncated}<p class="notice">版本目录达到读取上限，请先清理已确认的旧版本或不完整记录。</p>{/if}
   {#if !history.snapshots.length&&!history.incomplete.length}<div class="empty-state"><Icon name="clock" size={30}/><h3>还没有备份版本</h3><p>执行计划后，通过校验的版本会保存在这里。</p></div>{/if}
   {#each history.snapshots as snapshot (snapshot.id)}<article class="backup-version"><div><h3>{snapshot.name}</h3><p class="field-help">{time(snapshot.created_at)} · {snapshot.entries} 项 · {bytes(snapshot.bytes)} · {snapshot.deleting?'清理未完成':'创建时校验通过'}</p><small class="mono">{snapshot.id}</small><p class="field-help">来源：{rootName(snapshot.root)} / {snapshot.path}</p></div><div class="button-group">{#if snapshot.deleting}<button class="button secondary small" disabled={blocked} onclick={()=>open('cleanup',snapshot.id)}>继续清理</button>{:else}<button class="button secondary small" disabled={blocked} onclick={()=>open('verify',snapshot)}>校验</button><button class="button primary small" disabled={blocked||!roots.some((r)=>r.writable&&r.available)} onclick={()=>open('restore',snapshot)}>恢复</button><button class="text-button danger-text" disabled={blocked||!roots.find((r)=>r.id===historyRoot)?.writable} onclick={()=>open('delete',snapshot)}>删除副本</button>{/if}</div></article>{/each}
@@ -102,7 +103,7 @@
   {:else if modal.kind==='verify'}<p>读取“{modal.item.name}”的清单和全部文件，核对 {modal.item.entries} 项、{bytes(modal.item.bytes)} 的内容。大备份可能需要一些时间。</p>
   {:else if modal.kind==='restore'}<p>恢复“{modal.item.name}”：{modal.item.entries} 项、{bytes(modal.item.bytes)}。校验通过后才保存新目标，已有同名内容不会被覆盖。</p><label>目标存储目录<select aria-label="备份恢复目标存储目录" bind:value={toRoot} required disabled={pending}>{#each roots.filter((r)=>r.writable&&r.available) as root}<option value={root.id}>{root.label||root.id}</option>{/each}</select></label><label>新位置（相对目标存储目录）<input aria-label="备份恢复目标位置" bind:value={destination} maxlength="1024" required disabled={pending}/></label><p class="field-help">目标的上级文件夹需要已存在。停止时，已发布的目标会保留。</p>
   {:else}<p class="notice error">永久清理所选备份副本或不完整记录，释放其空间。原文件和已恢复的目标保留。取消只能保留尚未删除的部分。</p><p class="mono">{typeof modal.item==='string'?modal.item:modal.item.id}</p><label>输入完整版本编号确认<input aria-label="备份清理确认编号" bind:value={confirmation} required autocomplete="off" disabled={pending}/></label>{/if}
-  {#if dialogError}<p class="notice error" role="alert">{dialogError}</p>{/if}
+  {#if dialogError}<ErrorNotice message={dialogError}/>{/if}
   <footer class="dialog-footer"><button class="button secondary" type="button" disabled={pending} onclick={close}>关闭</button><button class="button primary" type="submit" disabled={pending||readOnly||(modal.kind==='delete'||modal.kind==='cleanup')&&confirmation!==(typeof modal.item==='string'?modal.item:modal.item.id)}>{pending?'正在处理…':'确认'+name(modal.kind)}</button></footer>
 </form></Dialog>{/if}
 

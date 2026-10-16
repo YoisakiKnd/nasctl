@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from '../components/ErrorNotice.svelte';
   import { bytes, time, modeLabels, jobLabels } from '../lib/format.js';
   import Icon from '../components/Icon.svelte';
   let { snapshot = null, error = '', onrefresh, loading = false, jobsAvailable = true, canConfigure = false } = $props();
@@ -7,7 +8,7 @@
   const jobs = $derived(snapshot?.running || []);
 </script>
 <header class="page-heading"><div><h1>概览</h1><p class="muted">设备状态、存储与任务一览。</p></div><button class="button secondary" onclick={onrefresh} disabled={loading}><Icon name="refresh" size={16}/>刷新状态</button></header>
-{#if error}<div class="notice error" role="alert">{error}</div>{/if}
+{#if error}<ErrorNotice message={error}/>{/if}
 {#if !snapshot}<div class="loading-state" role="status">正在读取设备状态…</div>{:else}
 <section class="stat-strip overview-stats" aria-label="设备概况">
   <div><span>运行模式</span><strong class="text-stat">{modeLabels[snapshot.mode?.mode] || '未知'}</strong></div>

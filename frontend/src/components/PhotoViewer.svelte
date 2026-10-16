@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from './ErrorNotice.svelte';
   import { onMount, untrack } from 'svelte';
   import { api } from '../lib/api.js';
   import { bytes, duration } from '../lib/format.js';
@@ -35,7 +36,7 @@
 <Dialog title={selected.name} photo {chromeHidden} onclose={onclose} onkey={photoKeys}>
   <div class="photo-viewer-date" inert={chromeHidden}><strong>{capture(selected.taken_at).slice(0,10)}</strong><span>{selected.vault ? '保险箱' : collectionName(selected.collection)}</span></div>
   <div class="photo-lightbox-tools" inert={chromeHidden}><span>{selectedIndex + 1} / {items.length}</span><div>{#if onmove && !selected.vault && detail?.item.kind === 'image' && !detail.item.missing}<button class="icon-button" aria-label="移入保险箱" title="移入保险箱" onclick={() => onmove(selected)}><Icon name="lock" size={19}/></button>{/if}<button class="icon-button" class:chosen={showInfo} aria-label="照片信息" aria-expanded={showInfo} onclick={() => showInfo = !showInfo}><Icon name="info" size={20}/></button>{#if detail && !detail.item.missing}<a class="icon-button" aria-label="下载原文件" title="下载原文件" href={mediaURL(detail.item,'download')} download={detail.item.name}><Icon name="download" size={20}/></a>{/if}</div></div>
-  {#if detailError}<p class="notice error" role="alert">{detailError}</p>{:else if !detail}<p class="loading-state" role="status">正在打开照片…</p>{:else}
+  {#if detailError}<ErrorNotice message={detailError}/>{:else if !detail}<p class="loading-state" role="status">正在打开照片…</p>{:else}
     <div class="album-detail" class:with-info={showInfo}>
       <div class="photo-stage">
         <button inert={chromeHidden} class="photo-step previous" aria-label="上一张" disabled={selectedIndex <= 0} onclick={() => navigate(-1)}><Icon name="back" size={24}/></button>

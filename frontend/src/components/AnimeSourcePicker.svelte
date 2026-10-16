@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from './ErrorNotice.svelte';
   import { onDestroy } from 'svelte';
   import { api } from '../lib/api.js';
   import Icon from './Icon.svelte';
@@ -30,7 +31,7 @@
   {#if bangumi}<p class="source-picked-title"><strong>{bangumi.name}</strong><span>接下来选择 Mikan 对应条目与字幕组</span><button type="button" class="text-button" disabled={disabled||busy} onclick={()=>switchProvider('bangumi')}>重新选番</button></p>{/if}
   <div class="source-search-row"><input aria-label="搜索 Bangumi 或 Mikan 番剧" bind:value={query} maxlength="100" placeholder="输入中文或日文番名…" disabled={disabled||busy} onkeydown={event=>{if(event.key==='Enter'){event.preventDefault();search();}}}/><button type="button" class="button primary" disabled={disabled||busy||!query.trim()} onclick={()=>search()}>{busy?'搜索中…':'搜索番剧'}</button></div>
   <p class="field-help">Bangumi 提供番剧资料；下载订阅来自 Mikan。搜索不会添加订阅或开始下载。</p>
-  {#if error}<p class="notice error" role="alert">{error}</p>{/if}
+  {#if error}<ErrorNotice message={error}/>{/if}
   {#if results&&!source}<div class="source-search-results" aria-label="番剧搜索结果">{#each results.results as item(item.id)}<button type="button" class="source-result" data-source-id={item.id} disabled={disabled||busy} onclick={()=>choose(item)}>{#if item.poster}<img src={item.poster} alt="" loading="lazy" referrerpolicy="no-referrer"/>{:else}<span class="source-poster-placeholder"><Icon name="anime" size={25}/></span>{/if}<span><strong>{item.name}</strong>{#if item.original_name&&item.original_name!==item.name}<small>{item.original_name}</small>{/if}{#if item.date}<small>{item.date}</small>{/if}<small>{provider==='bangumi'?'选择番剧，查找 Mikan 源':'选择字幕组与 RSS'}</small></span><Icon name="chevron" size={16}/></button>{/each}</div>
     {#if !results.results.length}<p class="notice">没有找到匹配番剧，试试日文原名、简称或另一来源，也可以在下方手动填写 RSS。</p>{/if}
     {#if provider==='bangumi'&&(page>1||results.has_more)}<div class="button-group"><button type="button" class="text-button" disabled={busy||disabled||page<=1} onclick={()=>search(page-1)}>上一页</button><span class="muted">第 {page} 页</span><button type="button" class="text-button" disabled={busy||disabled||!results.has_more} onclick={()=>search(page+1)}>下一页</button></div>{/if}

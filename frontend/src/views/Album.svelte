@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from '../components/ErrorNotice.svelte';
   import { onMount, tick } from 'svelte';
   import { api, query } from '../lib/api.js';
   import { duration } from '../lib/format.js';
@@ -79,7 +80,7 @@
   </header>
   {#if view === 'vault'}<PhotoVault {readOnly} candidate={moveCandidate} oncancel={() => moveCandidate = null} onmoved={() => {moveCandidate = null; load({reset:true});}}/>{:else}
   <div class="photo-library">
-    {#if error}<p class="notice error" role="alert">{error}<button class="text-button" onclick={() => load()}>重试</button></p>{/if}
+    {#if error}<ErrorNotice message={error} onretry={() => load()}/>{/if}
     {#if loading && !status}<p class="loading-state" role="status">正在读取照片…</p>
     {:else if status && !status.configured}<section class="empty-state"><Icon name="album" size={42}/><h2>让回忆有个家</h2><p>启用本地相册后，就可以在这里浏览照片和视频。</p></section>
     {:else if status && !status.connected}<section class="empty-state"><Icon name="album" size={42}/><h2>暂时无法读取照片</h2><p>{status.error || '请检查照片文件夹是否可用。'}</p><button class="button secondary" disabled={loading} onclick={() => load()}>重试</button></section>

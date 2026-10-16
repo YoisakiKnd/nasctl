@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from '../components/ErrorNotice.svelte';
   import { onMount } from 'svelte';
   import { api, query } from '../lib/api.js';
   import { bytes, duration } from '../lib/format.js';
@@ -63,7 +64,7 @@
   <div class="home-grid">
     <section class="panel home-storage" aria-labelledby="home-storage">
       <div class="panel-heading"><h2 id="home-storage">存储空间</h2><a class="text-button" href="#files">浏览文件<Icon name="chevron" size={14}/></a></div>
-      {#if error && !snapshot}<p class="notice error" role="alert">设备状态读取失败：{error}</p>
+      {#if error && !snapshot}<ErrorNotice message={'设备状态读取失败：' + error}/>
       {:else if !snapshot}<p class="section-empty" role="status">正在读取…</p>
       {:else if !roots.length}<p class="section-empty">还没有可用的存储目录。</p>
       {:else}<ul class="storage-meter-list">{#each roots as root (root.id)}<li><a href="#files"><span class="storage-icon" class:offline={!root.available}><Icon name="disk" size={20}/></span><div><strong>{root.label || root.id}</strong><small>{!root.available ? '暂不可用' : root.capacity ? bytes(root.capacity.available_bytes) + ' 可用 · 共 ' + bytes(root.capacity.total_bytes) : '容量暂不可用'}</small>{#if root.capacity}<progress class="capacity-meter" value={root.capacity.used_bytes} max={root.capacity.total_bytes} aria-label={(root.label || root.id) + ' 文件系统空间使用率'}></progress>{/if}</div></a></li>{/each}</ul>{/if}

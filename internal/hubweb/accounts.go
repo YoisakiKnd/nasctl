@@ -96,7 +96,7 @@ func (s *Server) handleAccountSetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 503, "audit_failed", "管理员已保存，但审计记录失败；请使用刚设置的账号登录后检查")
 		return
 	}
-	value, e := s.auth.createUser(now, u)
+	value, e := s.auth.createUser(now, u, false)
 	if e != nil {
 		accountError(w, e)
 		return

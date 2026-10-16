@@ -222,7 +222,7 @@ func (s *Store) uploadArchive(ctx context.Context, c Connection, r *Record, prog
 		res.Body.Close()
 		return s.verify(ctx, c, final, r.StoredBytes, r.SHA256)
 	}
-	if e = finish(res, 404); e != nil {
+	if e = finish("检查远端是否已有备份", res, 404); e != nil {
 		return e
 	}
 	file, e := s.root.OpenFile(r.ID+".age", os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
@@ -242,7 +242,7 @@ func (s *Store) uploadArchive(ctx context.Context, c Connection, r *Record, prog
 	defer func() {
 		cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer stop()
-		s.removeTemporary(cleanup, c, temporary)
+		s.removeTemporary(cleanup, c, temporary, false)
 	}()
 	sum, e := s.put(ctx, c, temporary, file, r.StoredBytes, func(n int64) {
 		if progress != nil {
@@ -253,12 +253,12 @@ func (s *Store) uploadArchive(ctx context.Context, c Connection, r *Record, prog
 		return e
 	}
 	if sum != r.SHA256 {
-		return ErrRemote
+		return &RemoteError{Step: "上传", Method: "PUT", Path: temporary, Reason: "上传内容与本地加密包的 SHA-256 不一致，本地暂存文件在上传中发生了变化"}
 	}
 	if progress != nil {
 		progress(Progress{"publish", r.Entries, r.StoredBytes, r.StoredBytes})
 	}
-	return s.move(ctx, c, temporary, final)
+	return s.move(ctx, c, temporary, final, false)
 }
 func (s *Store) sourceArchive(ctx context.Context, in Input) (*io.PipeReader, <-chan struct {
 	result files.ArchiveResult
@@ -300,7 +300,7 @@ func (s *Store) uploadDirect(ctx context.Context, c Connection, r *Record, progr
 	defer func() {
 		cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer stop()
-		s.removeTemporary(cleanup, c, temporary)
+		s.removeTemporary(cleanup, c, temporary, true)
 	}()
 	reader, done := s.sourceArchive(ctx, r.Input)
 	defer func() { reader.Close(); <-done }()
@@ -370,7 +370,7 @@ func (s *Store) uploadDirect(ctx context.Context, c Connection, r *Record, progr
 	if progress != nil {
 		progress(Progress{"publish", r.Entries, r.Bytes, r.Bytes})
 	}
-	return s.move(ctx, c, temporary, r.ID)
+	return s.move(ctx, c, temporary, r.ID, true)
 }
 func (s *Store) Retry(ctx context.Context, id string, progress func(Progress)) (record Record, err error) {
 	c, e := s.begin()
@@ -439,10 +439,10 @@ func (s *Store) directPublished(ctx context.Context, c Connection, r Record) (bo
 		return false, e
 	}
 	if res.StatusCode == 404 {
-		return false, finish(res, 404)
+		return false, finish("检查远端备份", res, 404)
 	}
 	if res.StatusCode != 200 {
-		return false, finish(res, 200)
+		return false, finish("检查远端备份", res, 200)
 	}
 	res.Body.Close()
 	m, e := s.getManifest(ctx, c, r)

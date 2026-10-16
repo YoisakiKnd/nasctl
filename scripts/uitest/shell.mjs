@@ -51,6 +51,13 @@ try{
   d.querySelector('.sidebar-exit').click();await wait(()=>active()==='home','back to the user area');
   check([...d.querySelectorAll('.tab-bar a')].map((node)=>node.textContent.trim()).join()==='首页,文件,相册,追番,我的','phones get a bottom tab bar with every user page');
 
+  // The avatar opens the Bits UI account menu, rendered in a portal.
+  const avatar=d.querySelector('.app-header button.avatar');check(avatar,'header avatar is a menu button');
+  avatar.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+  await wait(()=>d.querySelector('.menu [role="menuitem"]'),'account menu opens from the keyboard');
+  check([...d.querySelectorAll('.menu [role="menuitem"]')].some((node)=>node.textContent.includes('管理后台'))&&[...d.querySelectorAll('.menu [role="menuitemradio"]')].length===3,'menu offers the account page, admin area and three themes');
+  [...d.querySelectorAll('.menu [role="menuitem"]')].find((node)=>node.textContent.includes('账号与外观')).click();
+  await wait(()=>active()==='me','menu item opens the account page');
   await go('me');check(button('深色',page('me')),'theme choices are on the account page');
   button('深色',page('me')).click();await delay(0);check(d.documentElement.dataset.theme==='dark'&&w.localStorage.getItem('nasctl-theme')==='dark','explicit dark theme is applied and remembered');
   button('跟随系统',page('me')).click();await delay(0);check(d.documentElement.dataset.theme==='light'&&w.localStorage.getItem('nasctl-theme')===null,'following the system forgets the explicit choice');

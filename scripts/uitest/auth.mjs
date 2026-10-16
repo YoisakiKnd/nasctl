@@ -35,6 +35,9 @@ try {
   check(!d.querySelector('.nav-link'),'protected console is not mounted before login');
   input('#access-token','wrong-token'); submit();
   await wait(()=>text('.login-card [role="alert"]').includes('不正确'),'invalid credential feedback');
+  check(!d.querySelector('.login-card .error-detail'),'error details start collapsed');
+  d.querySelector('.login-card .error-toggle').click();await wait(()=>d.querySelector('.login-card .error-detail pre'),'details expand');
+  check(d.querySelector('.login-card .error-detail pre')?.textContent.includes('invalid_token'),'expanding shows the error code and status');
   input('#access-token',token); submit();
   await wait(()=>d.querySelector('.nav-link') && byText('添加订阅')?.disabled===false,'authenticated console');
   check(!w.document.cookie.includes('nasctl_session'),'session cookie is HttpOnly');

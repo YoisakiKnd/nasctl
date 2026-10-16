@@ -1,9 +1,13 @@
+// message is the summary; a technical detail from the server, when present,
+// follows on the next lines so ErrorNotice can show it behind "查看详情".
 export class APIError extends Error {
-  constructor(message, status, code) {
-    super(message);
+  constructor(message, status, code, detail = '') {
+    super(detail ? message + '\n' + detail : message);
     this.name = 'APIError';
     this.status = status;
     this.code = code;
+    this.summary = message;
+    this.detail = detail;
   }
 }
 
@@ -23,7 +27,7 @@ export async function api(path, options = {}) {
     const body = await response.json().catch(() => null);
     if (!response.ok) {
       if (response.status === 401 && !path.startsWith('/api/v1/auth/')) window.dispatchEvent(new CustomEvent('nasctl:unauthorized'));
-      throw new APIError(body?.message || `请求失败（${response.status}）`, response.status, body?.error);
+      throw new APIError(body?.message || `请求失败（${response.status}）`, response.status, body?.error, [body?.detail, body?.error && `错误代码：${body.error} · HTTP ${response.status}`].filter(Boolean).join('\n'));
     }
     return body;
   } catch (error) {

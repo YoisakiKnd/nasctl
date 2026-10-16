@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from './ErrorNotice.svelte';
   import { onMount, onDestroy, tick } from 'svelte';
   import { api, json } from '../lib/api.js';
   import { duration } from '../lib/format.js';
@@ -48,7 +49,7 @@
   onDestroy(() => { disposed = true; loadRequest?.abort(); if (!closing) persist(true); });
 </script>
 <Dialog title={`${episode.series} · 第 ${episode.number} 集`} wide onclose={close}>
-  {#if error}<p class="notice error" role="alert">{error}</p>
+  {#if error}<ErrorNotice message={error}/>
   {:else if !playback}<p class="loading-state" role="status">正在读取播放信息…</p>
   {:else}
     <video bind:this={video} controls playsinline preload="metadata" src={`/api/v1/anime/episodes/${episode.id}/video`} onloadedmetadata={loaded} ontimeupdate={() => { if (!video.paused) persist(); }} onpause={() => persist(true)} onended={() => persist(true)} onerror={() => error = '浏览器无法播放此文件。可下载原文件，或使用支持此编码的播放器。'}>
@@ -57,7 +58,7 @@
     {#if playback.episode.watch_position > 0 && !playback.episode.watched}<p class="field-help">将从 {duration(playback.episode.watch_position)} 继续播放。</p>{/if}
     {#if playback.subtitles.length}<div class="player-subtitles"><label>播放字幕<select value={subtitle} onchange={changeSubtitle}><option value="">不显示外挂字幕</option>{#each playback.subtitles.filter((item) => item.playable) as item}<option value={item.name}>{item.label} · {item.format.toUpperCase()}</option>{/each}</select></label><div class="subtitle-downloads">{#each playback.subtitles as item}<a class="text-button" href={subtitleURL(item.name) + '?download=1'} download={item.name}>下载 {item.label}（{item.format.toUpperCase()}）</a>{/each}</div><p class="field-help">浏览器可显示 UTF-8 的 SRT／VTT；ASS 等字幕可下载到外部播放器使用。</p></div>{/if}
     {#if playback.truncated}<p class="notice warning">目录或字幕数量达到读取上限，仅展示部分字幕。</p>{/if}
-    {#if subtitleError}<p class="notice error" role="alert">{subtitleError}</p>{/if}
+    {#if subtitleError}<ErrorNotice message={subtitleError}/>{/if}
     <p class="field-help" role="status">{readOnly ? '只读模式：播放不会保存观看进度。' : saved || '播放过程中每 15 秒、暂停和关闭时保存进度；看到 95% 后标记为已看完。'}</p>
   {/if}
   {#if saveError}<div class="notice error" role="alert"><p>{saveError}</p><button class="text-button" onclick={() => {closing = true; onclose();}}>放弃本次进度并关闭</button></div>{/if}

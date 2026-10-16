@@ -41,6 +41,15 @@ try{
   await wait(()=>!d.querySelector('dialog')&&row('说明.txt'),'XHR File upload completes');
   let download=await downloadLink('说明.txt');
   check(await(await request(download)).text()==='fixture upload content','uploaded bytes match the File');
+  // Drag and drop: files dropped on the page are preselected for upload; folders are skipped.
+  const dropEvent=(files,items)=>{const event=new w.Event('drop',{bubbles:true,cancelable:true});Object.defineProperty(event,'dataTransfer',{value:{types:['Files'],files,items}});return event;};
+  d.querySelector('button[aria-label="取消选择"]')?.click();await delay(0);
+  d.querySelector('.file-explorer').dispatchEvent(dropEvent([new w.File([''],'只是文件夹')],[{webkitGetAsEntry:()=>({isDirectory:true})}]));await delay(0);
+  check(!d.querySelector('dialog')&&d.querySelector('.file-explorer').textContent.includes('暂不支持拖放文件夹'),'a dropped folder is explained, not uploaded');
+  d.querySelector('.file-explorer').dispatchEvent(dropEvent([new w.File(['dropped bytes'],'拖放.txt',{type:'text/plain'})],[{webkitGetAsEntry:()=>({isDirectory:false})}]));
+  await wait(()=>d.querySelector('dialog .upload-files')?.textContent.includes('拖放.txt'),'dropped file is preselected for upload');submit();
+  await wait(()=>!d.querySelector('dialog')&&row('拖放.txt'),'dropped file uploads into the current folder');
+  check(await(await request(await downloadLink('拖放.txt'))).text()==='dropped bytes','dropped bytes match the File');
   await operation('说明.txt','改名／移动');await wait(()=>d.querySelector('dialog'),'rename dialog');
   input('input[aria-label="文件操作目标"]',fixture+'/改名.txt');submit();
   await wait(()=>!d.querySelector('dialog')&&row('改名.txt'),'rename updates listing');

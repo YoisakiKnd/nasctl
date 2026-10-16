@@ -17,7 +17,7 @@ export function uploadFile(root, path, file, { signal, onprogress } = {}) {
       if (request.status >= 200 && request.status < 300) finish(resolve,body);
       else {
         if (request.status === 401) window.dispatchEvent(new CustomEvent('nasctl:unauthorized'));
-        finish(reject,new APIError(body?.message || `上传未完成（${request.status}）`,request.status,body?.error));
+        finish(reject,new APIError(body?.message || `上传未完成（${request.status}）`,request.status,body?.error,[body?.detail,body?.error&&`错误代码：${body.error} · HTTP ${request.status}`].filter(Boolean).join('\n')));
       }
     };
     request.onerror = () => finish(reject,new APIError('网络中断，请刷新文件列表确认上传结果',0,'network'));

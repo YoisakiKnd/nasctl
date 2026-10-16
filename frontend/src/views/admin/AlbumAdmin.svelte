@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from '../../components/ErrorNotice.svelte';
   import { onMount } from 'svelte';
   import { api, json } from '../../lib/api.js';
   import Icon from '../../components/Icon.svelte';
@@ -56,7 +57,7 @@
   {#if status?.paused}<p class="notice warning">相册处理已暂停{status.pause_reason ? '：' + status.pause_reason : ''}。已有照片仍可浏览。</p>{/if}
   {#each [...(status?.warnings || []),...(listing?.warnings || [])] as warning}<p class="notice warning">{warningText(warning)}</p>{/each}
   {#if listing?.degraded}<p class="notice warning">缩略图处理处于资源保护状态，仍可读取已有内容。</p>{/if}
-  {#if controlError}<p class="notice error" role="alert">{controlError}</p>{/if}
+  {#if controlError}<ErrorNotice message={controlError}/>{/if}
   {#if (pending || loading) && !configuration}<p role="status">正在读取目录设置…</p>{/if}
   {#if configuration}
     <section class="panel album-control-section"><h3>照片目录</h3><p class="muted">从已配置的存储位置添加目录。原文件保持原位，扫描只更新索引。</p>

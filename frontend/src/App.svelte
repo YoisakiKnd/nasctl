@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from './components/ErrorNotice.svelte';
   import { onMount } from 'svelte';
   import { api } from './lib/api.js';
   import { modeLabels } from './lib/format.js';
@@ -12,6 +13,7 @@
   import Album from './views/Album.svelte';
   import Anime from './views/Anime.svelte';
   import Me from './views/Me.svelte';
+  import AccountMenu from './components/AccountMenu.svelte';
   import Overview from './views/Overview.svelte';
   import Jobs from './views/Jobs.svelte';
   import AlbumAdmin from './views/admin/AlbumAdmin.svelte';
@@ -32,6 +34,7 @@
   const role = $derived(roleOf(auth));
   const groups = $derived([...new Set(adminPages.map((page) => page.group))].map((group) => ({group, pages:adminPages.filter((page) => page.group === group)})));
   const healthy = $derived(snapshot && ['normal','maintenance'].includes(snapshot.mode?.mode));
+  const roleLabel = $derived(auth?.principal === 'ai' ? '程序访问' : ({admin:'管理员', operator:'操作员', viewer:'只读用户'})[auth?.role] || (auth?.can_manage_device ? '设备管理员' : ''));
   const displayName = $derived(auth?.display_name || auth?.name || (auth?.principal === 'local' ? '本机操作者' : '我'));
 
   function route() {
@@ -104,11 +107,11 @@
 
 {#snippet account()}
   <button class="theme-toggle icon-button" aria-label={theme === 'dark' || (theme === 'system' && matchMedia?.('(prefers-color-scheme: dark)')?.matches) ? '切换浅色模式' : '切换深色模式'} onclick={() => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark')}><Icon name="moon" size={18} class="theme-moon"/><Icon name="sun" size={18} class="theme-sun"/></button>
-  <a class="avatar" href="#me" aria-label={'我的账号：' + displayName} title={displayName}>{displayName.slice(0,1).toUpperCase()}</a>
+  <AccountMenu {displayName} roleLabel={roleLabel} {theme} adminHref={adminPages[0]?.id || ''} canLogout={Boolean(auth.required)} pending={authPending} onthemechange={setTheme} onlogout={logout}/>
 {/snippet}
 
 {#if !auth || authError}
-  <main class="login-page"><section class="login-card panel"><h1>连接你的 NAS</h1>{#if authError}<p class="notice error" role="alert">{authError}</p><button class="button primary" disabled={authPending} onclick={checkAuth}>重新连接</button>{:else}<p role="status">正在检查访问状态…</p>{/if}</section></main>
+  <main class="login-page"><section class="login-card panel"><h1>连接你的 NAS</h1>{#if authError}<ErrorNotice message={authError}/><button class="button primary" disabled={authPending} onclick={checkAuth}>重新连接</button>{:else}<p role="status">正在检查访问状态…</p>{/if}</section></main>
 {:else if !auth.authenticated}
   <Login available={auth.login_available} accounts={auth.accounts_enabled} setup={auth.setup_required} tokenAvailable={auth.token_login_available} onlogin={checkAuth}/>
 {:else}

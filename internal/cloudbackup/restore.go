@@ -24,13 +24,16 @@ func (s *Store) getManifest(ctx context.Context, c Connection, r Record) (manife
 		return m, e
 	}
 	defer res.Body.Close()
-	if res.StatusCode != 200 || r.StoredBytes < 1 || r.StoredBytes > 4<<20 {
+	if res.StatusCode != 200 {
+		return m, failure("读取备份清单", "GET", path.Join(r.ID, "manifest.json"), res, "")
+	}
+	if r.StoredBytes < 1 || r.StoredBytes > 4<<20 {
 		return m, ErrRemote
 	}
 	b, e := io.ReadAll(io.LimitReader(res.Body, r.StoredBytes+1))
 	sum := sha256.Sum256(b)
 	if e != nil || int64(len(b)) != r.StoredBytes || hex.EncodeToString(sum[:]) != r.SHA256 {
-		return m, ErrRemote
+		return m, &RemoteError{Step: "读取备份清单", Method: "GET", Path: path.Join(r.ID, "manifest.json"), Status: 200, Reason: "远端清单与本机记录不一致，备份可能被修改或替换"}
 	}
 	if json.Unmarshal(b, &m) != nil || m.Version != 1 || len(m.Items) > r.Input.Limit {
 		return m, ErrRemote
@@ -89,15 +92,15 @@ func (s *Store) streamDirect(ctx context.Context, c Connection, r Record, m mani
 		}
 		resBody = res.Body
 		if res.StatusCode != 200 {
+			err = failure("下载备份文件", "GET", path.Join(r.ID, item.Name), res, "")
 			resBody.Close()
-			err = ErrRemote
 			return
 		}
 		hash := sha256.New()
 		copied, e := io.CopyBuffer(io.MultiWriter(tw, hash), io.LimitReader(resBody, item.Bytes+1), make([]byte, 64<<10))
 		resBody.Close()
 		if e != nil || copied != item.Bytes || hex.EncodeToString(hash.Sum(nil)) != item.SHA256 {
-			err = ErrRemote
+			err = &RemoteError{Step: "下载备份文件", Method: "GET", Path: path.Join(r.ID, item.Name), Status: 200, Reason: "下载内容与备份清单不一致，远端文件可能被修改或损坏"}
 			return
 		}
 		n += copied
@@ -146,7 +149,7 @@ func (s *Store) Restore(ctx context.Context, id, toRoot, to, password string, pr
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		return files.CopyResult{}, ErrRemote
+		return files.CopyResult{}, failure("下载加密备份", "GET", remoteName(r), res, "")
 	}
 	digest := files.NewDigestReader(io.LimitReader(res.Body, r.StoredBytes+1))
 	identity, e := age.NewScryptIdentity(password)
@@ -192,8 +195,9 @@ func (s *Store) Download(ctx context.Context, id string) (io.ReadCloser, int64, 
 		return nil, 0, "", e
 	}
 	if res.StatusCode != 200 {
+		e := failure("下载加密备份", "GET", remoteName(r), res, "")
 		res.Body.Close()
-		return nil, 0, "", ErrRemote
+		return nil, 0, "", e
 	}
 	return &verifiedBody{ReadCloser: res.Body, reader: files.NewDigestReader(io.LimitReader(res.Body, r.StoredBytes+1)), size: r.StoredBytes, sum: r.SHA256}, r.StoredBytes, remoteName(r), nil
 }

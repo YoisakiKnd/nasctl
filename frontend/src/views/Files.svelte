@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from '../components/ErrorNotice.svelte';
   import { getContext, onMount, tick, untrack } from 'svelte';
   import { api, query } from '../lib/api.js';
   import { bytes, time } from '../lib/format.js';
@@ -20,7 +21,7 @@
   let limits=$state({copy_max_entries:10000,copy_max_bytes:8*1024**3,batch_max_items:100,max_page_size:200,search_max_results:200});
   const pageSize=$derived(Math.min(50,limits.default_page_size||50,limits.max_page_size));
   const selectionWritable=$derived(selection.length>0&&!readOnly&&!agent&&selection.every((item)=>roots.some((r)=>r.id===item._root&&r.writable&&r.available)));
-  let action=$state(null),message=$state(''),task=$state(''),uploadMax=$state(8*1024**3);
+  let dragging=$state(false),action=$state(null),message=$state(''),task=$state(''),uploadMax=$state(8*1024**3);
   let view=$state('grid'),details=$state(true),locations=$state(false),pins=$state([]),recent=$state([]),menu=$state(null);
   let tabs=$state([{id:1,location:null,back:[],forward:[]}]),activeTab=$state(1),tabNumber=1;
   let explorer=$state(),grid=$state(),menuElement=$state(),columns=$state(1),focusIndex=$state(0);
@@ -120,6 +121,19 @@
   function operate(operation,entry=null){
     menu=null;message='';const rootID=entry?._root||root;action={operation,entry,root:rootID,directory:entry?.path?('/'+relative(entry.path).split('/').slice(0,-1).join('/')):path};
   }
+  // Drag and drop: files dropped on the page upload into the current folder.
+  const canDrop=()=>canWrite&&!trash&&scope==='folder';
+  function dragOver(event){if(!event.dataTransfer?.types?.includes('Files'))return;event.preventDefault();event.dataTransfer.dropEffect=canDrop()?'copy':'none';dragging=true;}
+  function dragLeave(event){if(!event.currentTarget.contains(event.relatedTarget))dragging=false;}
+  function drop(event){
+    if(!event.dataTransfer?.types?.includes('Files'))return;
+    event.preventDefault();dragging=false;if(!canDrop()||action)return;
+    const items=[...(event.dataTransfer.items||[])];
+    const folders=items.filter((item)=>item.webkitGetAsEntry?.()?.isDirectory).length;
+    const dropped=[...event.dataTransfer.files].filter((_,i)=>!items[i]?.webkitGetAsEntry?.()?.isDirectory);
+    if(!dropped.length){message=folders?'暂不支持拖放文件夹，请拖入文件，或先新建文件夹。':'';return;}
+    menu=null;message=folders?`已跳过 ${folders} 个文件夹，只上传文件。`:'';action={operation:'upload',root,directory:path,files:dropped};
+  }
   function operateBatch(operation){menu=null;message='';action={batch:true,operation,items:[...selection],directory:scope==='folder'&&!trash?path:'/'};}
   function toggleTrash(item,event){select(item,-1,{ctrlKey:true});}
   function updateTask(data){
@@ -160,7 +174,8 @@
   });
 </script>
 <svelte:window onkeydown={drawerKeys} onpointerdown={(event)=>{if(menu&&!event.target.closest('.file-context-menu'))menu=null;}}/>
-<div class="file-explorer" bind:this={explorer} class:show-details={details} class:show-locations={locations}>
+<div class="file-explorer" bind:this={explorer} class:show-details={details} class:show-locations={locations} role="region" aria-label="文件浏览器" ondragenter={dragOver} ondragover={dragOver} ondragleave={dragLeave} ondrop={drop}>
+  {#if dragging}<div class="drop-overlay" class:refused={!canDrop()} aria-hidden="true"><Icon name="upload" size={34}/><strong>{canDrop()?'松开上传到“'+(crumbs.at(-1)||rootLabel(root))+'”':trash?'回收站不能上传':'此位置为只读，不能上传'}</strong></div>{/if}
   <div class="finder-tabs"><div class="finder-tab-list" role="tablist" aria-label="文件位置标签">{#each tabs as tab,index (tab.id)}<div class="finder-tab" class:active={tab.id===activeTab}><button role="tab" aria-controls={paneID} tabindex={tab.id===activeTab?0:-1} onkeydown={(event)=>tabKeys(event,index)} aria-selected={tab.id===activeTab} onclick={()=>switchTab(tab)}><Icon name="folder" size={15}/><span>{tabLabel(tab)}</span></button>{#if tabs.length>1}<button class="finder-tab-close" aria-label={'关闭标签 '+tabLabel(tab)} onclick={()=>closeTab(tab)}><Icon name="close" size={12}/></button>{/if}</div>{/each}</div><button class="icon-button" aria-label="新建位置标签" disabled={tabs.length>=8||!root} onclick={addTab}><Icon name="plus" size={17}/></button><span class="finder-workspace">本地空间</span></div>
   <div class="finder-layout" id={paneID} role="tabpanel" aria-label={title}>
     <aside class="finder-sidebar" aria-label="文件位置">
@@ -194,7 +209,7 @@
           {:else}<button class="finder-action" disabled={!canCopy} onclick={()=>operateBatch('copy')}>批量复制</button><button class="finder-action" disabled={!selectionWritable} onclick={()=>operateBatch('move')}>批量移动</button><button class="finder-action danger-text" disabled={!selectionWritable} onclick={()=>operateBatch('trash')}>批量回收</button>{/if}
         {:else if selected&&!trash}<button class="finder-action" onclick={()=>open(selected)}><Icon name={selected.is_dir?'folder':'external'} size={15}/>打开</button><button class="finder-action" aria-label="所选文件更多操作" onclick={(event)=>showMenu(event)}><Icon name="more" size={17}/>更多</button>{:else}<button class="finder-action" disabled={!canWrite||trash||scope!=='folder'} title={!canWrite?'此位置为只读，无法新建':undefined} onclick={()=>operate('mkdir')}><Icon name="folderplus" size={16}/>新建文件夹</button><button class="finder-action" disabled={!canWrite||trash||scope!=='folder'} title={!canWrite?'此位置为只读，无法上传':undefined} onclick={()=>operate('upload')}><Icon name="upload" size={16}/>上传文件</button>{/if}{#if selection.length}<button class="icon-button" aria-label="取消选择" onclick={clearSelection}><Icon name="close" size={14}/></button>{/if}</div><div class="finder-sort">{#if scope==='folder'&&!trash}<button class="icon-button" class:active={pinned} aria-label={pinned?'取消固定当前目录':'固定当前目录'} disabled={!root} onclick={togglePin}><Icon name="pin" size={15}/></button>{/if}<select aria-label="文件排序" bind:value={sort} disabled={scope!=='folder'||trash} onchange={()=>{page=1;clearSelection();storeTab();load();}}><option value="name:asc">名称 ↑</option><option value="name:desc">名称 ↓</option><option value="time:desc">最新修改</option><option value="size:desc">体积最大</option><option value="kind:asc">文件类型</option></select></div></div>
       <div class="finder-scroll">
-        {#if error}<div class="notice error" role="alert">{error}<button class="text-button" onclick={()=>load()}>重试</button></div>{/if}{#if message}<div class="notice success" role="status">{message}<button class="text-button" aria-label="关闭文件操作提示" onclick={()=>message=''}>×</button></div>{/if}
+        {#if error}<ErrorNotice message={error} onretry={()=>load()}/>{/if}{#if message}<div class="notice success" role="status">{message}<button class="text-button" aria-label="关闭文件操作提示" onclick={()=>message=''}>×</button></div>{/if}
         {#if task}{#key task}<section class="task-panel"><TaskMonitor id={task} onupdate={updateTask} onsettled={()=>{clearSelection();load();}}/>{#if batchResult}<FileBatchResult result={batchResult}/>{/if}<a class="text-button" href="#admin/jobs">在任务中心查看</a></section>{/key}{/if}
         {#if loading}<div class="loading-state" role="status">正在读取文件…</div>
         {:else if !roots.length}<section class="empty-state"><Icon name="folder" size={40}/><h2>添加第一个存储目录</h2><p>配置存储目录后，即可在这里浏览和整理文件。</p></section>
@@ -214,5 +229,5 @@
   </div>
   {#if menu}<div class="file-context-menu" style:left={menu.x+'px'} style:top={menu.y+'px'} role="menu" aria-label="文件操作" tabindex="-1" bind:this={menuElement} onkeydown={menuKeys}><button role="menuitem" onclick={()=>{open(menu.entry);menu=null;}}><Icon name="external" size={15}/>打开</button>{#if !menu.entry.is_dir}<a role="menuitem" href={download(menu.entry)} download={menu.entry.name} onclick={()=>menu=null}><Icon name="download" size={15}/>下载</a>{/if}<hr/><button role="menuitem" disabled={!canCopy} onclick={()=>operate('copy',menu.entry)}><Icon name="copy" size={15}/>复制</button><button role="menuitem" disabled={!selectedWritable} onclick={()=>operate('move',menu.entry)}><Icon name="move" size={15}/>移动</button><button role="menuitem" disabled={!selectedWritable} onclick={()=>operate('rename',menu.entry)}><Icon name="edit" size={15}/>改名／移动</button><hr/><button role="menuitem" class="danger-text" disabled={!selectedWritable} onclick={()=>operate('trash',menu.entry)}><Icon name="trash" size={15}/>移入回收站</button>{#if !selectedWritable}<p>此位置只读，整理操作不可用</p>{/if}</div>{/if}
 </div>
-{#if action?.batch}<FileBatch operation={action.operation} items={action.items} {roots} directory={action.directory} {limits} onclose={()=>action=null} oncomplete={completed}/>{:else if action}<FileOperation operation={action.operation} entry={action.entry} root={action.root} {roots} rootLabel={rootLabel(action.root)} directory={action.directory} {uploadMax} {limits} onclose={()=>{action=null;clearSelection();load();}} oncomplete={completed}/>{/if}
+{#if action?.batch}<FileBatch operation={action.operation} items={action.items} {roots} directory={action.directory} {limits} onclose={()=>action=null} oncomplete={completed}/>{:else if action}<FileOperation operation={action.operation} initialFiles={action.files||[]} entry={action.entry} root={action.root} {roots} rootLabel={rootLabel(action.root)} directory={action.directory} {uploadMax} {limits} onclose={()=>{action=null;clearSelection();load();}} oncomplete={completed}/>{/if}
 {#if fullPreview&&selected}<Dialog title={selected.name} wide onclose={()=>fullPreview=false}><FilePreview entry={selected} info={previewInfo} error={previewError} src={previewURL} onerror={()=>previewError='当前格式无法预览，可下载后使用本地应用打开。'}/>{#if previewInfo&&!previewInfo.previewable}<p class="muted">这种格式可下载后使用本地应用打开。</p>{/if}<footer class="dialog-footer"><span class="muted">{bytes(selected.size)}</span><button class="button secondary" onclick={()=>fullPreview=false}>关闭</button><a class="button primary" href={download(selected)} download={selected.name}>下载文件</a></footer></Dialog>{/if}

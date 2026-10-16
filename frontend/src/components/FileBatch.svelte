@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from './ErrorNotice.svelte';
   import { untrack, onDestroy } from 'svelte';
   import { api, json } from '../lib/api.js';
   import { bytes } from '../lib/format.js';
@@ -35,7 +36,7 @@
     <label>整批条目预算<input aria-label="批量条目预算" type="number" min="1" max={limits.copy_max_entries} bind:value={limit} required disabled={pending}/></label>
     {#if operation==='copy'||operation==='move'}<label>整批复制字节预算<input aria-label="批量字节预算" type="number" min="1" max={limits.copy_max_bytes} bind:value={maxBytes} required disabled={pending}/></label>{/if}
     <p class="field-help">整批上限 {limits.copy_max_entries.toLocaleString()} 项、{bytes(limits.copy_max_bytes)}；达到预算或停止任务时，剩余项目不再开始。文件夹复制计入全部子项，回收／恢复计为一次移动。</p>
-    {#if error}<p class="notice error" role="alert">{error}</p>{/if}
+    {#if error}<ErrorNotice message={error}/>{/if}
     <footer class="dialog-footer"><button class="button secondary" type="button" disabled={pending} onclick={onclose}>关闭</button><button class="button primary" type="submit" disabled={pending||!items.length||(operation==='copy'||operation==='move')&&!destinationRoot}>{pending?'正在创建任务…':'确认批量'+names[operation]}</button></footer>
   </form>
 </Dialog>

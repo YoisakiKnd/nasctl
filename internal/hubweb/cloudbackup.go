@@ -50,7 +50,11 @@ func (s *Server) cloudError(w http.ResponseWriter, e error) {
 	case errors.Is(e, cloudbackup.ErrInvalid):
 		writeError(w, 400, "webdav_scope", "配置或备份范围已变更，请重新读取并核对")
 	case errors.Is(e, cloudbackup.ErrRemote):
-		writeError(w, 502, "webdav_failed", "WebDAV 请求或回读校验失败，请检查地址、账号、权限及 MOVE 支持")
+		msg, detail := "WebDAV 请求或回读校验失败，请检查地址、账号、权限及 MOVE 支持", ""
+		if summary, d, ok := cloudbackup.Explain(e); ok {
+			msg, detail = "WebDAV 请求失败："+summary, d
+		}
+		writeErrorDetail(w, 502, "webdav_failed", msg, detail)
 	default:
 		s.fileWriteError(w, e)
 	}
@@ -211,6 +215,10 @@ func cloudWorkError(e error) error {
 		message = "密码错误，或加密包未通过校验。"
 	case errors.Is(e, cloudbackup.ErrRemote):
 		message = "WebDAV 上传或回读校验失败，请检查连接、写入权限和 MOVE 支持。"
+		if summary, detail, ok := cloudbackup.Explain(e); ok {
+			// The first line is the summary; the rest is shown on demand.
+			message = "WebDAV " + summary + "\n" + detail
+		}
 	case errors.Is(e, cloudbackup.ErrInvalid):
 		message = "备份范围或连接已变更，请重新读取并核对。"
 	case errors.Is(e, files.ErrExists):
@@ -221,6 +229,9 @@ func cloudWorkError(e error) error {
 		message = "可用空间不足，已保留原文件并停止备份。"
 	case errors.Is(e, files.ErrReadOnly):
 		message = "目标存储位置只读，请选择可写位置。"
+	default:
+		// Backups are administrator work; the underlying cause helps them.
+		message += "\n错误：" + domain.Redact(e.Error())
 	}
 	return errors.New(message)
 }

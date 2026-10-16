@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from './ErrorNotice.svelte';
   import { onMount } from 'svelte';
   import { api,json } from '../lib/api.js';
   import { bytes } from '../lib/format.js';
@@ -17,7 +18,7 @@
 </script>
 <section class="panel settings-section nas-settings" aria-label="统一设备设置">
   <div class="panel-heading"><div><h2>设备配置</h2><p class="muted">校验后保存，下次重启生效。原始 TOML 文件保留。</p></div><button class="button secondary small" disabled={pending} onclick={load}>{draft?'重新读取并放弃草稿':'读取配置'}</button></div>
-  {#if error}<p class="notice error" role="alert">{error}</p>{/if}{#if message}<p class="notice success" role="status">{message}</p>{/if}
+  {#if error}<ErrorNotice message={error}/>{/if}{#if message}<p class="notice success" role="status">{message}</p>{/if}
   {#if snapshot?.restart_required}<p class="notice warning" role="status">已有配置等待重启。这里编辑的是已保存值；当前任务仍按启动时的配置运行。</p>{/if}
   {#if draft}
     <fieldset disabled={pending||readOnly}>
@@ -36,4 +37,4 @@
     <details class="nas-active"><summary>查看当前运行值</summary><dl class="key-values"><dt>存储目录</dt><dd>{snapshot.active.storage.map(root=>root.label||root.id).join('、')||'未配置'}</dd><dt>上传上限</dt><dd>{bytes(snapshot.active.files.upload_max_bytes)}</dd><dt>复制上限</dt><dd>{bytes(snapshot.active.files.copy_max_bytes)}</dd><dt>原生追番</dt><dd>{snapshot.active.anime.enabled?'启用':'关闭'} · {snapshot.active.anime.auto_poll?'定时调度':'手动调度'}</dd><dt>开放任务上限</dt><dd>{snapshot.active.jobs.max_open_jobs}</dd><dt>任务历史上限</dt><dd>{snapshot.active.jobs.max_history}</dd><dt>处理组件内存上限</dt><dd>{snapshot.active.guard_memory.worker_max_mb} MiB</dd></dl></details>
   {:else if pending}<p class="section-empty" role="status">正在读取配置…</p>{/if}
 </section>
-{#if confirm&&checked}<Dialog title="保存设备配置" onclose={()=>{if(!pending)confirm=false;}}><p>保存 {checked.request.settings.storage.length} 个存储目录，以及文件、追番和资源预算。已选“清除”的秘密将删除，已选“设置”的值将替换。</p><p class="muted">当前运行任务继续使用原配置。请在任务停止后重启 nasctl，使新目录和预算生效。</p><div class="dialog-footer"><button class="button secondary" disabled={pending} onclick={()=>confirm=false}>返回修改</button><button class="button primary" disabled={pending} onclick={save}>{pending?'正在保存…':'确认保存，下次启动生效'}</button></div>{#if error}<p class="notice error" role="alert">{error}</p>{/if}</Dialog>{/if}
+{#if confirm&&checked}<Dialog title="保存设备配置" onclose={()=>{if(!pending)confirm=false;}}><p>保存 {checked.request.settings.storage.length} 个存储目录，以及文件、追番和资源预算。已选“清除”的秘密将删除，已选“设置”的值将替换。</p><p class="muted">当前运行任务继续使用原配置。请在任务停止后重启 nasctl，使新目录和预算生效。</p><div class="dialog-footer"><button class="button secondary" disabled={pending} onclick={()=>confirm=false}>返回修改</button><button class="button primary" disabled={pending} onclick={save}>{pending?'正在保存…':'确认保存，下次启动生效'}</button></div>{#if error}<ErrorNotice message={error}/>{/if}</Dialog>{/if}

@@ -27,6 +27,9 @@ type browserAuth struct {
 	sessions map[[32]byte]time.Time
 	failures map[string]loginFailures
 	users    map[[32]byte]userSession
+	// remembered marks account sessions kept across restarts in rememberPath.
+	remembered   map[[32]byte]bool
+	rememberPath string
 }
 type userSession struct{ ID, Epoch string }
 type loginFailures struct {
@@ -38,7 +41,8 @@ func publicRoute(r *http.Request) bool {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
 		switch r.URL.Path {
-		case "/", "/index.html", "/app.js", "/app.css", "/api/v1/auth/status":
+		case "/", "/index.html", "/app.js", "/app.css", "/api/v1/auth/status",
+			"/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/icon-maskable.png", "/apple-touch-icon.png":
 			return true
 		}
 	case http.MethodPost:
@@ -60,17 +64,19 @@ func (a *browserAuth) authenticated(r *http.Request) bool {
 		return false
 	}
 	if !time.Now().Before(expires) {
-		delete(a.sessions, key)
-		delete(a.users, key)
+		a.drop(key)
 		return false
 	}
 	return true
 }
 
 func (a *browserAuth) create(now time.Time) (string, error) {
-	return a.createSession(now, nil)
+	return a.createSession(now, nil, false)
 }
-func (a *browserAuth) createSession(now time.Time, user *userSession) (string, error) {
+
+// createSession issues a session. remember keeps an account session for
+// rememberTTL and across restarts; it is ignored for token sessions.
+func (a *browserAuth) createSession(now time.Time, user *userSession, remember bool) (string, error) {
 	var raw [32]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", err
@@ -78,13 +84,10 @@ func (a *browserAuth) createSession(now time.Time, user *userSession) (string, e
 	value := base64.RawURLEncoding.EncodeToString(raw[:])
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.sessions == nil {
-		a.sessions = make(map[[32]byte]time.Time)
-	}
+	a.ensureMaps()
 	for key, expires := range a.sessions {
 		if !now.Before(expires) {
-			delete(a.sessions, key)
-			delete(a.users, key)
+			a.drop(key)
 		}
 	}
 	// Least remaining lifetime is the oldest session; make room without growth.
@@ -96,16 +99,17 @@ func (a *browserAuth) createSession(now time.Time, user *userSession) (string, e
 				oldest, deadline = key, expires
 			}
 		}
-		delete(a.sessions, oldest)
-		delete(a.users, oldest)
+		a.drop(oldest)
 	}
 	key := sha256.Sum256([]byte(value))
 	a.sessions[key] = now.Add(sessionTTL)
 	if user != nil {
-		if a.users == nil {
-			a.users = map[[32]byte]userSession{}
-		}
 		a.users[key] = *user
+		if remember {
+			a.sessions[key] = now.Add(rememberTTL)
+			a.remembered[key] = true
+			a.saveRemembered()
+		}
 	}
 	return value, nil
 }
@@ -213,6 +217,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Token    string `json:"token"`
 		Username string `json:"username"`
 		Password string `json:"password"`
+		Remember bool   `json:"remember"`
 	}
 	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
 	d.DisallowUnknownFields()
@@ -244,7 +249,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 401, "invalid_credentials", "用户名或密码不正确")
 			return
 		}
-		value, err = s.auth.createUser(now, user)
+		value, err = s.auth.createUser(now, user, input.Remember)
 	} else {
 		if input.Password != "" {
 			writeError(w, 400, "bad_request", "请输入用户名")
@@ -267,9 +272,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, 500, "internal_error", err)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil, MaxAge: int(sessionTTL.Seconds()), Expires: now.Add(sessionTTL)})
+	ttl := sessionTTL
+	if input.Remember && input.Username != "" {
+		ttl = rememberTTL
+	}
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil, MaxAge: int(ttl.Seconds()), Expires: now.Add(ttl)})
 	clearLegacyCookie(w, r)
-	writeJSON(w, 200, map[string]any{"authenticated": true, "expires_at": now.Add(sessionTTL)})
+	writeJSON(w, 200, map[string]any{"authenticated": true, "expires_at": now.Add(ttl)})
 }
 
 func clearLegacyCookie(w http.ResponseWriter, r *http.Request) {
@@ -281,8 +290,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		s.auth.mu.Lock()
-		delete(s.auth.sessions, sha256.Sum256([]byte(c.Value)))
-		delete(s.auth.users, sha256.Sum256([]byte(c.Value)))
+		s.auth.drop(sha256.Sum256([]byte(c.Value)))
 		s.auth.mu.Unlock()
 	}
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil, MaxAge: -1, Expires: time.Unix(1, 0)})

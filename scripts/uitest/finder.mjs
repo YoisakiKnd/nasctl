@@ -27,7 +27,7 @@ try{
  named('新建位置标签').click();await wait(()=>d.querySelectorAll('[role="tab"]').length===2&&files().length>1,'second location tab');
  d.querySelectorAll('[role="tab"]')[0].click();await wait(()=>d.querySelectorAll('.breadcrumbs button').length===2,'tab preserves folder');
  d.querySelectorAll('[role="tab"]')[1].click();await wait(()=>files().length>1,'switch back to root tab');
- named('列表视图').click();await delay(0);check(d.querySelector('.finder-list')&&w.localStorage.getItem('nasctl-files-view')==='list','list view and preference');
+ named('列表视图').click();await wait(()=>d.querySelector('.finder-list'),'list view renders');check(w.localStorage.getItem('nasctl-files-view')==='list','list view and preference');
  named('图标视图').click();await delay(0);
  const file=files().find((node)=>!node.classList.contains('entry-dir')),fileName=file.querySelector('.entry-label').textContent;
  file.click();await wait(()=>d.querySelector('.finder-details h2')?.textContent===fileName,'selected detail');

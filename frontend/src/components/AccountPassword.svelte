@@ -1,4 +1,5 @@
 <script>
+  import ErrorNotice from './ErrorNotice.svelte';
   import { api,json } from '../lib/api.js';
   import Dialog from './Dialog.svelte';
   let { auth,oncomplete,variant='avatar' }=$props();
@@ -17,7 +18,7 @@
     <label>新密码<input aria-label="我的新密码" type="password" autocomplete="new-password" required minlength="12" maxlength="1024" bind:value={password}/></label>
     <label>再次输入新密码<input aria-label="确认我的新密码" type="password" autocomplete="new-password" required maxlength="1024" bind:value={again}/></label>
     <p class="field-help">密码至少 12 个字符，最多 1024 字节。</p>
-    {#if error}<p class="notice error" role="alert">{error}</p>{/if}
+    {#if error}<ErrorNotice message={error}/>{/if}
     <div class="dialog-footer"><button class="button secondary" type="button" onclick={close}>返回</button><button class="button primary" type="submit" disabled={!valid||!current}>{pending?'正在保存…':'确认修改并重新登录'}</button></div>
   </fieldset></form>
   {#if discard}<div class="notice"><p>密码尚未保存，关闭后会清空输入。</p><div class="button-row"><button class="button secondary" onclick={()=>discard=false}>继续编辑</button><button class="button danger" onclick={clear}>放弃修改</button></div></div>{/if}

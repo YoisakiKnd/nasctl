@@ -3,6 +3,7 @@ package hubweb
 import (
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -93,6 +94,21 @@ func TestEmbeddedAssetsCompressAndCacheStampedURLs(t *testing.T) {
 	for _, name := range []string{"app.js", "app.css"} {
 		if !strings.Contains(shell, `"/`+name+`?v=`+assetTable["/"+name].hash[:12]+`"`) {
 			t.Fatalf("index.html does not stamp %s with its content hash", name)
+		}
+	}
+}
+
+func TestErrorDetailIsOnlyForDeviceAdministrators(t *testing.T) {
+	s := &Server{}
+	for _, admin := range []bool{true, false} {
+		res := httptest.NewRecorder()
+		s.fail(&statusWriter{ResponseWriter: res, code: 200, detail: admin}, 500, "state_error", errors.New("open /srv/private/state.db: permission denied"))
+		body := res.Body.String()
+		if !strings.Contains(body, "读取控制台状态失败") {
+			t.Fatalf("message not localised: %s", body)
+		}
+		if strings.Contains(body, "/srv/private") != admin {
+			t.Fatalf("admin=%v detail exposure wrong: %s", admin, body)
 		}
 	}
 }

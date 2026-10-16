@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/xml"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -40,20 +41,38 @@ func (s *Store) request(ctx context.Context, c Connection, method, rel string, b
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, ErrRemote
+		return nil, networkFailure(method, rel, e)
 	}
 	return res, nil
 }
-func finish(res *http.Response, allowed ...int) error {
+
+// finish accepts one of the allowed statuses and otherwise explains the
+// failure for the given step, always draining and closing the body.
+func finish(step string, res *http.Response, allowed ...int) error {
 	defer res.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 8192))
 	for _, code := range allowed {
 		if res.StatusCode == code {
+			_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 8192))
 			return nil
 		}
 	}
-	return ErrRemote
+	e := failure(step, res.Request.Method, relOf(res), res, "")
+	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 8192))
+	return e
 }
+
+// relOf recovers the remote path of a response for error details.
+func relOf(res *http.Response) string {
+	if res.Request == nil || res.Request.URL == nil {
+		return ""
+	}
+	return res.Request.URL.Path
+}
+
+// collection marks a remote path as a directory. nginx's WebDAV module
+// refuses MKCOL, and MOVE or DELETE of a directory, without the trailing
+// slash; other servers accept either form.
+func collection(rel string) string { return strings.TrimSuffix(rel, "/") + "/" }
 func (s *Store) Probe(ctx context.Context, revision string) error {
 	c, e := s.begin()
 	if e != nil {
@@ -70,7 +89,7 @@ func (s *Store) Probe(ctx context.Context, revision string) error {
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 207 {
-		return ErrRemote
+		return failure("连接测试", "PROPFIND", "", res, "")
 	}
 	bounded := &io.LimitedReader{R: res.Body, N: 65537}
 	d := xml.NewDecoder(bounded)
@@ -81,7 +100,7 @@ func (s *Store) Probe(ctx context.Context, revision string) error {
 			break
 		}
 		if e != nil {
-			return ErrRemote
+			return &RemoteError{Step: "连接测试", Method: "PROPFIND", Status: 207, Reason: "服务器的目录列表不是有效的 WebDAV XML"}
 		}
 		if start, ok := token.(xml.StartElement); ok && start.Name.Space == "DAV:" && start.Name.Local == "collection" {
 			found = true
@@ -90,26 +109,35 @@ func (s *Store) Probe(ctx context.Context, revision string) error {
 	if found && bounded.N > 0 {
 		return nil
 	}
-	return ErrRemote
+	return &RemoteError{Step: "连接测试", Method: "PROPFIND", Status: 207, Reason: "地址指向的不是一个目录，或目录列表超过 64 KiB"}
 }
 func (s *Store) mkdir(ctx context.Context, c Connection, rel string) error {
-	res, e := s.request(ctx, c, "MKCOL", rel, nil, 0, nil)
+	res, e := s.request(ctx, c, "MKCOL", collection(rel), nil, 0, nil)
 	if e != nil {
 		return e
 	}
-	return finish(res, 201)
+	return finish("建立远端目录", res, 201)
 }
-func (s *Store) move(ctx context.Context, c Connection, from, to string) error {
+
+// move publishes a finished upload under its final name. Directories use the
+// collection form on both sides.
+func (s *Store) move(ctx context.Context, c Connection, from, to string, directory bool) error {
+	if directory {
+		from, to = collection(from), collection(to)
+	}
 	res, e := s.request(ctx, c, "MOVE", from, nil, 0, map[string]string{"Destination": davURL(c, to), "Overwrite": "F"})
 	if e != nil {
 		return e
 	}
-	return finish(res, 201, 204)
+	return finish("改为正式名称", res, 201, 204)
 }
-func (s *Store) removeTemporary(ctx context.Context, c Connection, rel string) {
+func (s *Store) removeTemporary(ctx context.Context, c Connection, rel string, directory bool) {
+	if directory {
+		rel = collection(rel)
+	}
 	res, e := s.request(ctx, c, "DELETE", rel, nil, 0, nil)
 	if e == nil {
-		_ = finish(res, 200, 204, 404)
+		_ = finish("清理临时文件", res, 200, 204, 404)
 	}
 }
 func (s *Store) put(ctx context.Context, c Connection, rel string, r io.Reader, size int64, progress func(int64)) (string, error) {
@@ -119,11 +147,11 @@ func (s *Store) put(ctx context.Context, c Connection, rel string, r io.Reader, 
 	if e != nil {
 		return "", e
 	}
-	if e = finish(res, 200, 201, 204); e != nil {
+	if e = finish("上传", res, 200, 201, 204); e != nil {
 		return "", e
 	}
 	if counter.n != size {
-		return "", ErrRemote
+		return "", &RemoteError{Step: "上传", Method: "PUT", Path: rel, Reason: fmt.Sprintf("只发送了 %d 字节，应为 %d 字节；本地文件在上传中发生了变化", counter.n, size)}
 	}
 	sum := hex.EncodeToString(h.Sum(nil))
 	if e = s.verify(ctx, c, rel, size, sum); e != nil {
@@ -138,12 +166,17 @@ func (s *Store) verify(ctx context.Context, c Connection, rel string, size int64
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
-		return ErrRemote
+		return failure("回读校验", "GET", rel, res, "")
 	}
 	h := sha256.New()
 	n, e := io.CopyBuffer(h, io.LimitReader(res.Body, size+1), make([]byte, 64<<10))
-	if e != nil || n != size || hex.EncodeToString(h.Sum(nil)) != sum {
-		return ErrRemote
+	switch {
+	case e != nil:
+		return &RemoteError{Step: "回读校验", Method: "GET", Path: rel, Status: 200, Reason: "读回时连接中断（" + printable(e.Error()) + "）"}
+	case n != size:
+		return &RemoteError{Step: "回读校验", Method: "GET", Path: rel, Status: 200, Reason: fmt.Sprintf("读回 %d 字节，上传的是 %d 字节。服务端可能改写了文件，或仍在后台转存", n, size)}
+	case hex.EncodeToString(h.Sum(nil)) != sum:
+		return &RemoteError{Step: "回读校验", Method: "GET", Path: rel, Status: 200, Reason: "读回的内容与上传的不一致（SHA-256 不同）。服务端可能改写了文件内容"}
 	}
 	return nil
 }
