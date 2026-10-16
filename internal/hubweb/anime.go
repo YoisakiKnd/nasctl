@@ -287,7 +287,7 @@ func (s *Server) handleAnimeVideo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", contentTypeFor(fi.Name()))
 	w.Header().Set("Content-Disposition", "inline")
 	w.Header().Set("Cache-Control", "private, no-store")
-	http.ServeContent(w, r, fi.Name(), fi.ModTime(), f)
+	http.ServeContent(transfer(w), r, fi.Name(), fi.ModTime(), f)
 }
 
 // WaitWork is called after HTTP shutdown and cancellation of WorkContext.

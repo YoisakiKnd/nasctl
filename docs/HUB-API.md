@@ -303,6 +303,31 @@ to this process is the same for 4 KiB and 4 GiB.
 * Range requests are supported, so an interrupted transfer can be resumed.
 * `HEAD` is supported.
 * Bounded by the concurrent-stream limit.
+* The write deadline moves forward with each write: a transfer is dropped only
+  after 30 s without progress, not after the server's total `write_timeout`.
+  The same applies to previews, media playback and vault originals.
+
+---
+
+## GET /api/v1/files/archive
+
+Streams a folder as a ZIP attachment (`<folder>.zip`; the root itself is named
+after the root's label). Entries are stored, not compressed.
+
+| Parameter | Type | Notes |
+| --- | --- | --- |
+| `root` | string | required |
+| `path` | string | the folder; empty or `/` is the root |
+
+* The folder is planned before any byte is sent. More than `copy_max_entries`
+  entries, `copy_max_bytes` bytes or 32 levels is a `413 too_large`, never a
+  truncated archive.
+* Links and special files are skipped; hidden files follow the root's
+  `expose_hidden`; internal names (trash, backup namespaces) are never included.
+* No write lock is taken. A file that changes during the transfer drops the
+  connection, so the browser reports a failed download instead of saving a
+  mixed archive.
+* Shares the concurrent-stream limit and the 30 s idle deadline.
 
 ---
 

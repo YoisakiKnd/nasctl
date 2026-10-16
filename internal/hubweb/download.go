@@ -1,10 +1,14 @@
 package hubweb
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
+
+	"github.com/YoisakiKnd/nasctl/internal/files"
 )
 
 // handleFileDownload streams a file as an attachment.
@@ -69,7 +73,7 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
-	http.ServeContent(w, r, fi.Name(), fi.ModTime(), f)
+	http.ServeContent(transfer(w), r, fi.Name(), fi.ModTime(), f)
 }
 
 // contentDisposition builds a Content-Disposition value for a filename that came
@@ -151,4 +155,100 @@ func rfc5987Encode(name string) string {
 		}
 	}
 	return b.String()
+}
+
+// transferIdle is how long a download may stall before it is dropped.
+const transferIdle = 30 * time.Second
+
+// idleDeadlineWriter moves the write deadline forward before every write. A
+// transfer then fails only when it stalls, not after the server's total
+// WriteTimeout: a large file or a playing video legitimately takes longer than
+// that, while a vanished client still frees its stream slot within seconds.
+type idleDeadlineWriter struct {
+	http.ResponseWriter
+	rc *http.ResponseController
+}
+
+func (w idleDeadlineWriter) Write(p []byte) (int, error) {
+	_ = w.rc.SetWriteDeadline(time.Now().Add(transferIdle))
+	return w.ResponseWriter.Write(p)
+}
+func (w idleDeadlineWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// transfer wraps w for a long streaming response.
+func transfer(w http.ResponseWriter) http.ResponseWriter {
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Now().Add(transferIdle))
+	return idleDeadlineWriter{ResponseWriter: w, rc: rc}
+}
+
+// handleFolderDownload streams a folder as a ZIP. The folder is planned first,
+// so one that exceeds the copy budget is refused with an error instead of an
+// archive that stops halfway. Like a file download it holds a stream slot.
+func (s *Server) handleFolderDownload(w http.ResponseWriter, r *http.Request) {
+	if s.Files == nil {
+		writeError(w, http.StatusServiceUnavailable, "no_storage", "尚未配置存储目录")
+		return
+	}
+	root, path := r.URL.Query().Get("root"), r.URL.Query().Get("path")
+	if root == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "缺少存储目录参数")
+		return
+	}
+	// Paths are relative to the root; "/" or an empty path is the root itself.
+	path = strings.Trim(path, "/")
+	if path == "" {
+		path = "."
+	}
+	select {
+	case s.streamSlots <- struct{}{}:
+		defer func() { <-s.streamSlots }()
+	case <-r.Context().Done():
+		return
+	default:
+		w.Header().Set("Retry-After", "2")
+		writeError(w, http.StatusServiceUnavailable, "busy", "同时进行的下载太多，请稍后再试")
+		return
+	}
+	limits := s.Files.Limits()
+	plan, err := s.Files.PlanZip(r.Context(), root, path, limits.CopyMaxEntries, limits.CopyMaxBytes)
+	if errors.Is(err, files.ErrTreeLimit) {
+		writeError(w, http.StatusRequestEntityTooLarge, "too_large", fmt.Sprintf("文件夹超过打包下载上限（最多 %d 项、%s 或 32 层），请分开下载", limits.CopyMaxEntries, sizeLabel(limits.CopyMaxBytes)))
+		return
+	}
+	if errors.Is(err, files.ErrSourceChanged) {
+		writeError(w, http.StatusConflict, "interrupted", "文件夹正在变化，请稍后重试")
+		return
+	}
+	if err != nil {
+		status, code := mapFileErr(err)
+		s.fail(w, status, code, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", contentDisposition(plan.Name+".zip"))
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Nasctl-Archive-Entries", fmt.Sprint(plan.Entries))
+	if r.Method == http.MethodHead {
+		return
+	}
+	if err := plan.Write(r.Context(), transfer(w)); err != nil {
+		if s.Log != nil {
+			s.Log.Error("folder download stopped", "root", root, "error", err.Error())
+		}
+		// The ZIP's directory is written last; dropping the connection makes
+		// the browser report a failed download rather than a broken archive.
+		panic(http.ErrAbortHandler)
+	}
+}
+
+func sizeLabel(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.0f GiB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.0f MiB", float64(n)/(1<<20))
+	}
+	return fmt.Sprintf("%d 字节", n)
 }

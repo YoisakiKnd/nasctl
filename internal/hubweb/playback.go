@@ -103,7 +103,7 @@ func (s *Server) handleAnimePoster(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", "private, no-store")
-	http.ServeContent(w, r, info.Name(), info.ModTime(), f)
+	http.ServeContent(transfer(w), r, info.Name(), info.ModTime(), f)
 }
 func (s *Server) handleAnimeSubtitle(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAnime(w, r, false) {
@@ -129,7 +129,7 @@ func (s *Server) handleAnimeSubtitle(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("download") == "1" {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Disposition", contentDisposition(info.Name()))
-		http.ServeContent(w, r, info.Name(), info.ModTime(), f)
+		http.ServeContent(transfer(w), r, info.Name(), info.ModTime(), f)
 		return
 	}
 	b, err := anime.SubtitleVTT(info.Name(), f)

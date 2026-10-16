@@ -36,6 +36,9 @@ try{
   const fixture='DOM Files '+Date.now();button('新建文件夹').click();
   await wait(()=>d.querySelector('dialog'),'create dialog');input('input[aria-label="文件操作目标"]',fixture);submit();
   await wait(()=>!d.querySelector('dialog')&&row(fixture),'directory is created');
+  row(fixture).click();await wait(()=>d.querySelector('.finder-details a[href*="/files/archive?"]'),'a selected folder offers a ZIP download');
+  const zipped=await request(d.querySelector('.finder-details a[href*="/files/archive?"]').getAttribute('href'));
+  check(zipped.status===200&&zipped.headers.get('content-type')==='application/zip'&&(await zipped.arrayBuffer()).byteLength>0,'folder ZIP download works against the real API');
   row(fixture).dispatchEvent(new w.MouseEvent('dblclick',{bubbles:true}));await wait(()=>d.querySelectorAll('.breadcrumbs button').length===2&&!d.querySelector('.loading-state'),'enter directory');
   await chooseUpload('说明.txt','fixture upload content');
   await wait(()=>!d.querySelector('dialog')&&row('说明.txt'),'XHR File upload completes');

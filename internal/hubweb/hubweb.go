@@ -234,6 +234,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/files/preview", s.handleFilePreview)
 	mux.HandleFunc("GET /api/v1/files/download", s.handleFileDownload)
 	mux.HandleFunc("HEAD /api/v1/files/download", s.handleFileDownload)
+	mux.HandleFunc("GET /api/v1/files/archive", s.handleFolderDownload)
+	mux.HandleFunc("HEAD /api/v1/files/archive", s.handleFolderDownload)
 	mux.HandleFunc("POST /api/v1/files/mkdir", s.handleFileMutation)
 	mux.HandleFunc("POST /api/v1/files/rename", s.handleFileMutation)
 	mux.HandleFunc("POST /api/v1/files/trash", s.handleFileMutation)
@@ -679,11 +681,65 @@ func writeError(w http.ResponseWriter, status int, code, msg string) {
 // writeErrorDetail adds an optional technical explanation that the UI shows
 // behind an expandable "details" control.
 func writeErrorDetail(w http.ResponseWriter, status int, code, msg, detail string) {
+	msg, detail = localizeError(code, msg, detail)
 	body := map[string]any{"error": code, "message": msg}
 	if detail != "" {
 		body["detail"] = detail
 	}
 	writeJSON(w, status, body)
+}
+
+// errorText gives a Chinese message for codes whose handlers still describe
+// the problem in English. The English text is kept as the detail.
+var errorText = map[string]string{
+	"bad_request":           "请求参数无效，请刷新页面后重试",
+	"denied":                "没有权限执行此操作",
+	"role_denied":           "此账号角色无权执行该操作",
+	"not_configured":        "该功能尚未启用，请在系统设置中配置",
+	"read_only":             "控制台当前为只读模式",
+	"not_found":             "没有找到对应的记录，可能已被移动或删除",
+	"busy":                  "设备正忙，请稍后重试",
+	"no_storage":            "尚未配置存储目录",
+	"rate_limited":          "尝试次数过多，请稍后重试",
+	"internal_error":        "服务内部出错，请稍后重试",
+	"encode_error":          "响应生成失败，请稍后重试",
+	"not_settable":          "该设置不能在网页上修改",
+	"cross_origin":          "已拒绝来自其他网站的请求",
+	"unauthorised":          "请先登录",
+	"too_large":             "文件太大，无法在网页中处理",
+	"no_preview":            "此文件不支持预览，可以下载后查看",
+	"timeout":               "处理超时，请稍后重试",
+	"invalid_range":         "请求的文件范围无效",
+	"interrupted":           "操作被中断，请刷新后确认结果",
+	"not_running":           "任务已经结束",
+	"shutting_down":         "服务正在停止",
+	"anime_error":           "追番操作没有完成",
+	"state_error":           "读取控制台状态失败，请稍后重试",
+	"no_such_root":          "没有这个存储目录，请刷新后重试",
+	"outside_root":          "路径超出了存储目录范围",
+	"confirmation_required": "请确认后再执行此操作",
+}
+
+// localizeError keeps Chinese messages as they are. An English message is
+// moved into the detail and replaced by the code's Chinese text.
+func localizeError(code, msg, detail string) (string, string) {
+	for _, r := range msg {
+		if r >= 0x4e00 && r <= 0x9fff {
+			return msg, detail
+		}
+	}
+	text, ok := errorText[code]
+	if !ok {
+		text = "操作没有完成，请稍后重试"
+	}
+	if msg != "" {
+		if detail != "" {
+			detail = msg + "\n" + detail
+		} else {
+			detail = msg
+		}
+	}
+	return text, detail
 }
 
 // detailAllowed reports whether internal error text may be shown to this

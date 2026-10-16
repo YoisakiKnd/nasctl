@@ -1057,6 +1057,8 @@ button.avatar {padding:0; cursor:pointer;}
 .error-detail .text-button {justify-self:start; color:inherit;}
 .inline-error.error-notice {display:flex; gap:8px;}
 .inline-error .error-detail pre {background:var(--error-bg);}
+.cloud-record .inline-error>.error-body>p {color:var(--error); font-size:12px;}
+.cloud-record .error-detail pre {font-size:11px;}
 
 @media(max-width:1023px) {
   .admin-shell {grid-template-columns:minmax(0,1fr); grid-template-areas:"top" "main";}

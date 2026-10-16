@@ -741,7 +741,7 @@ func (s *Server) handleFilePreview(w http.ResponseWriter, r *http.Request) {
 	//
 	// It also means the console never buffers the whole file: ServeContent
 	// copies through the same bounded path.
-	http.ServeContent(w, r, fi.Name(), fi.ModTime(), f)
+	http.ServeContent(transfer(w), r, fi.Name(), fi.ModTime(), f)
 	_ = kind
 }
 

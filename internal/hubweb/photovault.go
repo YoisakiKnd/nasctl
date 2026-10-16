@@ -189,7 +189,7 @@ func (s *Server) handleVaultStream(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Disposition", contentDisposition(item.Name))
 		}
 	}
-	http.ServeContent(w, r, item.Name, time.Time{}, reader)
+	http.ServeContent(transfer(w), r, item.Name, time.Time{}, reader)
 }
 func (s *Server) handleVaultMove(w http.ResponseWriter, r *http.Request) {
 	if !s.vaultAccess(w, r) {
