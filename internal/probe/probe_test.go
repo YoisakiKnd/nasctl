@@ -3,6 +3,8 @@ package probe
 import (
 	"bytes"
 	"encoding/binary"
+	"image"
+	"image/jpeg"
 	"os"
 	"path/filepath"
 	"strings"
@@ -320,7 +322,8 @@ func TestProbeRefusesAPixelBombFromTheHeaderAlone(t *testing.T) {
 	if r.Pixels != 3_600_000_000 {
 		t.Errorf("Pixels = %d, want 3600000000", r.Pixels)
 	}
-	if want := "over_pixel_budget:3600000000>12000000"; r.SkippedReason != want {
+	// The header is refused as implausible before any budget is consulted.
+	if want := "implausible_dimensions:3600000000>500000000"; r.SkippedReason != want {
 		t.Errorf("SkippedReason = %q, want %q", r.SkippedReason, want)
 	}
 	if r.Thumbnailable() {
@@ -341,7 +344,8 @@ func TestProbeRefusesAPixelBombFromTheHeaderAlone(t *testing.T) {
 		{"file too large", "photos/2021/trip/IMG_0100.jpg", Budget{MaxFileBytes: 1}, "file_too_large"},
 		{"decode estimate too large", "photos/2021/trip/IMG_0100.jpg", Budget{MaxDecodeBytes: 1}, "over_decode_budget"},
 		{"too many animation frames", "edge/anim.gif", Budget{MaxFrames: 1}, "animated_over_frame_budget"},
-		{"pixels over budget", "photos/2020/big/DSC_0001.jpg", Budget{MaxPixels: 1_000_000}, "over_pixel_budget"},
+		// JPEG counts the pixels decoded for the thumbnail, not the photo's.
+		{"pixels over budget", "photos/2020/big/DSC_0001.jpg", Budget{MaxPixels: 1_000}, "over_pixel_budget"},
 	}
 	for _, c := range budgetCases {
 		t.Run(c.name, func(t *testing.T) {
@@ -863,5 +867,52 @@ func TestReadPrefixIsBounded(t *testing.T) {
 	}
 	if r, err := Probe(filepath.Join(dir, "does-not-exist.jpg"), "jpg", testBudget(), Limits{}); err == nil || r != nil {
 		t.Errorf("Probe on a missing file returned (%v, %v), want a nil result and an error", r, err)
+	}
+}
+
+func TestLibvipsMakesHEICAndTIFFThumbnailable(t *testing.T) {
+	dir, _ := synthLibrary(t)
+	for _, rel := range []string{"unsupported/photo.heic", "unsupported/scan.tiff"} {
+		without := probeFixture(t, dir, rel, Budget{MaxPixels: 12_000_000})
+		if without.Kind != KindUnsupported {
+			t.Fatalf("%s without libvips: kind %q", rel, without.Kind)
+		}
+		with := probeFixture(t, dir, rel, Budget{MaxPixels: 12_000_000, Vips: true})
+		if with.Kind != KindImage || with.UnsupportedReason != "" || with.SkippedReason != "" || !with.Thumbnailable() {
+			t.Fatalf("%s with libvips: kind %q unsupported %q skipped %q", rel, with.Kind, with.UnsupportedReason, with.SkippedReason)
+		}
+	}
+	// RAW stays unsupported: libvips does not read it without extra loaders.
+	if raw := probeFixture(t, dir, "unsupported/raw.cr2", Budget{Vips: true}); raw.Kind != KindUnsupported {
+		t.Fatal("RAW became thumbnailable", raw.Kind)
+	}
+}
+
+// A JPEG whose headers run past the short first read is read in full.
+func TestProbeReadsFurtherWhenHeadersAreLong(t *testing.T) {
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, image.NewGray(image.Rect(0, 0, 640, 480)), nil); err != nil {
+		t.Fatal(err)
+	}
+	data := buf.Bytes()
+	// 100 KB of APP2 segments before the frame header.
+	var pad []byte
+	for i := 0; i < 2; i++ {
+		seg := make([]byte, 4+50_000)
+		seg[0], seg[1] = 0xFF, 0xE2
+		binary.BigEndian.PutUint16(seg[2:], uint16(50_000+2))
+		pad = append(pad, seg...)
+	}
+	long := append(append(append([]byte{}, data[:2]...), pad...), data[2:]...)
+	path := filepath.Join(t.TempDir(), "long.jpg")
+	if err := os.WriteFile(path, long, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Probe(path, "jpg", Budget{}, Limits{ScanBytes: 512 << 10})
+	if err != nil || r.Width != 640 || r.Height != 480 {
+		t.Fatal(r, err)
+	}
+	if jpegHeadersComplete(long[:quickWindow]) || !jpegHeadersComplete(data) {
+		t.Fatal("header completeness misjudged")
 	}
 }

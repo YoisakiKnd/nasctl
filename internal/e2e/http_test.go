@@ -132,12 +132,11 @@ func TestThumbnailIsServedAtTheConfiguredBound(t *testing.T) {
 	}
 }
 
-// TestPortraitOrientationIsNotAutoRotated pins the current, documented
-// behaviour rather than desirable behaviour: the stored orientation is
-// reported to the client, and the client is what rotates. If this ever starts
-// failing because the server rotates instead, that is a deliberate change and
-// the metadata contract should be updated with it.
-func TestPortraitOrientationIsNotAutoRotated(t *testing.T) {
+// TestPortraitThumbnailIsTurnedUpright pins the metadata contract since 0.6.0
+// (docs/API.md): the orientation is still reported, but the thumbnail is
+// already upright, because a thumbnail carries no EXIF for a browser to act
+// on. Until 0.6.0 the pixels were stored unrotated and no client turned them.
+func TestPortraitThumbnailIsTurnedUpright(t *testing.T) {
 	_, s, a := serveIndexed(t)
 
 	id := a.idFor("photos/2019/paris/IMG_0007.jpg")
@@ -153,11 +152,9 @@ func TestPortraitOrientationIsNotAutoRotated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("thumbnail is not decodable: %v", err)
 	}
-	// 1280x960 stored, longest edge 512 -> 512x384. A server-side rotation
-	// would produce 384x512 and leave nothing for the client to do.
-	if cfg.Width != 512 || cfg.Height != 384 {
-		t.Errorf("thumbnail is %dx%d; the pixel data is stored unrotated and the orientation "+
-			"field is what tells the client to turn it", cfg.Width, cfg.Height)
+	// 1280x960 stored with orientation 6 (a quarter turn) -> 384x512 upright.
+	if cfg.Width != 384 || cfg.Height != 512 {
+		t.Errorf("thumbnail is %dx%d; want 384x512, turned upright from orientation 6", cfg.Width, cfg.Height)
 	}
 }
 

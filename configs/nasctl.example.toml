@@ -136,6 +136,9 @@ cooldown_after_trip = "30m"
 
 [decode]
 # Pre-screening. A file outside these bounds is skipped, never attempted.
+# max_pixels bounds the pixels decoded into memory. JPEG is decoded at the
+# smallest of 1/8, 1/4, 1/2 or full size that still reaches thumb_max_edge,
+# so a 48 MP photo counts as about 0.75 MP here.
 max_pixels = 12000000
 max_file_bytes = 268435456
 max_decode_mem_mb = 96        # must not exceed guard.worker_mem_max_mb
@@ -173,6 +176,18 @@ webp = true
 # resource profile of the thumbnail task and needs its own authorization.
 video_poster = false
 ffmpeg_path = "ffmpeg"
+
+# PNG, WebP, TIFF, HEIC and AVIF thumbnails use libvips' `vips` tool when it
+# is installed (Debian/Ubuntu: apt install libvips-tools; HEIC also needs
+# libheif-plugin-libde265). It streams large images, reads the formats Go
+# cannot, and runs inside the same memory limit as the built-in decoder.
+# Set use_vips = false to always use the built-in decoders.
+use_vips = true
+vips_path = "vips"
+# JPEG stays with the built-in decoder, which shrinks while decoding and avoids
+# libvips' start-up cost per photo. Turn this on if libvips measures faster on
+# your machine.
+vips_for_jpeg = false
 video_poster_timeout = "30s"
 video_poster_seek = "3s"
 

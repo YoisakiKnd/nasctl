@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"github.com/YoisakiKnd/nasctl/internal/exif"
+	"github.com/YoisakiKnd/nasctl/internal/jpegscale"
 	"github.com/YoisakiKnd/nasctl/internal/mimetype"
+	"github.com/YoisakiKnd/nasctl/internal/vips"
 )
 
 // Kind is the coarse classification stored in the index.
@@ -49,7 +51,19 @@ type Budget struct {
 	MaxDecodeBytes int64
 	MaxFrames      int
 	ThumbMaxEdge   int
+	// Vips reports that libvips will make the thumbnails. It decodes at a
+	// reduced size or streams, under the worker's memory ceiling, so the
+	// pixel and decode estimates do not apply, and HEIC, AVIF and TIFF become
+	// thumbnailable images.
+	Vips bool
+	// VipsJPEG reports that libvips makes JPEG thumbnails too; otherwise JPEG
+	// stays with the built-in decoder and its budget.
+	VipsJPEG bool
 }
+
+// MaxSourcePixels refuses implausible headers whatever the decoder: no camera
+// makes a 500 MP photo, and a header that claims one is a crafted file.
+const MaxSourcePixels = 500_000_000
 
 // Result is what the probe learned.
 type Result struct {
@@ -61,6 +75,11 @@ type Result struct {
 	Pixels   int64
 	Animated bool
 	Frames   int
+	// Progressive JPEGs need their coefficients kept for the whole decode.
+	Progressive bool
+	// DecodedPixels is the size actually decoded for a thumbnail, when the
+	// decoder can shrink while decoding (JPEG); zero otherwise.
+	DecodedPixels int64
 
 	// Container metadata for video files.
 	DurationMS     int64
@@ -173,11 +192,62 @@ func Probe(path string, ext string, budget Budget, lim Limits) (*Result, error) 
 	if lim.Exif == (exif.Limits{}) {
 		lim.Exif = exif.DefaultLimits()
 	}
-	data, st, err := ReadPrefix(path, lim.ScanBytes)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if st.IsDir() {
+		return nil, fmt.Errorf("probe: %s is a directory", path)
+	}
+	// Most JPEGs finish their headers - EXIF included, since APP segments
+	// precede the frame header - in the first few kilobytes. Read a short
+	// window first and the full one only when the frame header is not in it:
+	// on a hard disk that is an eighth of the reading for a typical library.
+	window := min(lim.ScanBytes, quickWindow)
+	data, err := readUpTo(f, window)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == window && window < lim.ScanBytes && !jpegHeadersComplete(data) {
+		rest, err := readUpTo(f, lim.ScanBytes-window)
+		if err != nil {
+			return nil, err
+		}
+		data = append(data, rest...)
+	}
 	return ProbeBytes(data, st.Size(), ext, budget, lim)
+}
+
+// quickWindow is the first read of a probe.
+const quickWindow = 64 << 10
+
+func readUpTo(r io.Reader, n int) ([]byte, error) {
+	buf := make([]byte, n)
+	got, err := io.ReadFull(r, buf)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return nil, err
+	}
+	return buf[:got], nil
+}
+
+// jpegHeadersComplete reports whether data is a JPEG whose frame header, and
+// so every segment before it, lies entirely inside data.
+func jpegHeadersComplete(data []byte) bool {
+	if exif.DetectFormat(data) != "jpeg" {
+		return false
+	}
+	d, notes := jpegHeader(data)
+	for _, n := range notes {
+		if strings.Contains(n, "truncated") {
+			return false
+		}
+	}
+	return d.Width > 0 && d.Height > 0
 }
 
 // ProbeBytes is Probe for an in-memory prefix, used by tests.
@@ -195,6 +265,9 @@ func ProbeBytes(data []byte, fileSize int64, ext string, budget Budget, lim Limi
 	// matrix says is never decoded could be handed to a decoder.
 	ext = mimetype.Normalize(ext)
 	extKind, extKnown := ExtensionIndex()[ext]
+	if budget.Vips && vips.ExtraExtensions[ext] {
+		extKind = KindImage
+	}
 
 	r := &Result{Format: "unknown", Kind: KindOther, MIME: MIMEForExt(ext)}
 	format := exif.DetectFormat(data)
@@ -220,6 +293,7 @@ func ProbeBytes(data []byte, fileSize int64, ext string, budget Budget, lim Limi
 		r.Kind = kindFor(r, extKind, extKnown, KindImage)
 		info, notes := jpegHeader(data)
 		r.Width, r.Height = info.Width, info.Height
+		r.Progressive = info.Progressive
 		r.Notes = append(r.Notes, notes...)
 		if tags, terr := exif.ParseJPEG(data, lim.Exif); terr != nil {
 			r.Notes = append(r.Notes, exifNote(terr))
@@ -279,6 +353,14 @@ func ProbeBytes(data []byte, fileSize int64, ext string, budget Budget, lim Limi
 		r.Notes = append(r.Notes, notes...)
 		switch brandClass(brand) {
 		case "image":
+			if budget.Vips && r.UnsupportedReason == "" {
+				r.Kind = KindImage
+				r.Format = "heic"
+				if brand == "avif" || brand == "avis" {
+					r.Format = "avif"
+				}
+				break
+			}
 			r.Kind = KindUnsupported
 			r.UnsupportedReason = "format_not_enabled:isobmff-image:" + brand
 		case "video":
@@ -294,6 +376,15 @@ func ProbeBytes(data []byte, fileSize int64, ext string, budget Budget, lim Limi
 			r.ContainerTZUTC = true
 		}
 	default:
+		if budget.Vips && vips.ExtraExtensions[ext] && r.UnsupportedReason == "" {
+			// libvips sniffs the content itself when the thumbnail is made.
+			r.Kind = KindImage
+			r.Format = map[string]string{"tif": "tiff"}[ext]
+			if r.Format == "" {
+				r.Format = ext
+			}
+			break
+		}
 		if r.UnsupportedReason == "" {
 			r.Kind = KindUnsupported
 			r.UnsupportedReason = "unrecognised_format"
@@ -318,6 +409,9 @@ func ProbeBytes(data []byte, fileSize int64, ext string, budget Budget, lim Limi
 	if r.Pixels > 0 {
 		r.EstimatedDecodeBytes = EstimateDecodeBytes(r.Kind, r.Format, r.Pixels, r.Width, r.Height,
 			budget.ThumbMaxEdge)
+		if r.Format == "jpeg" {
+			r.DecodedPixels, r.EstimatedDecodeBytes = EstimateJPEG(r.Width, r.Height, r.Progressive, budget.ThumbMaxEdge)
+		}
 	}
 
 	if r.UnsupportedReason == "" {
@@ -405,12 +499,27 @@ func applyBudget(r *Result, fileSize int64, b Budget) {
 		// pixel reasons.
 		return
 	}
+	if r.Pixels > MaxSourcePixels {
+		r.SkippedReason = fmt.Sprintf("implausible_dimensions:%d>%d", r.Pixels, MaxSourcePixels)
+		return
+	}
+	if b.Vips && vips.Formats[r.Format] && (r.Format != "jpeg" || b.VipsJPEG) {
+		// libvips bounds its own memory: reduced-size JPEG decoding and
+		// streaming for the rest, under the worker's cgroup ceiling.
+		return
+	}
 	if r.Animated && b.MaxFrames > 0 && r.Frames > b.MaxFrames {
 		r.SkippedReason = fmt.Sprintf("animated_over_frame_budget:%d>%d", r.Frames, b.MaxFrames)
 		return
 	}
-	if b.MaxPixels > 0 && r.Pixels > b.MaxPixels {
-		r.SkippedReason = fmt.Sprintf("over_pixel_budget:%d>%d", r.Pixels, b.MaxPixels)
+	// The pixel limit is on what is decoded into memory. JPEG is decoded at
+	// the smallest size the thumbnail needs, so its decoded size counts.
+	decoded := r.Pixels
+	if r.DecodedPixels > 0 {
+		decoded = r.DecodedPixels
+	}
+	if b.MaxPixels > 0 && decoded > b.MaxPixels {
+		r.SkippedReason = fmt.Sprintf("over_pixel_budget:%d>%d", decoded, b.MaxPixels)
 		return
 	}
 	if r.Pixels == 0 && r.Width == 0 {
@@ -459,6 +568,25 @@ func EstimateDecodeBytes(kind Kind, format string, pixels int64, w, h, thumbEdge
 	est += int64(thumbEdge) * int64(thumbEdge) * 4
 	est += overhead
 	return est
+}
+
+// EstimateJPEG is the decode estimate for a JPEG thumbnail. The image is
+// decoded at the smallest scale that still reaches the thumbnail edge, so it
+// costs that size rather than the photo's: three bytes a pixel covers 4:4:4.
+// A progressive image also holds every coefficient until its last scan,
+// counted here as three full-resolution components (the 4:4:4 worst case).
+func EstimateJPEG(w, h int, progressive bool, thumbEdge int) (decodedPixels, bytes int64) {
+	if thumbEdge <= 0 {
+		thumbEdge = 512
+	}
+	scale := jpegscale.ScaleFor(w, h, thumbEdge)
+	dw, dh := int64((w*scale+7)/8), int64((h*scale+7)/8)
+	decodedPixels = dw * dh
+	bytes = decodedPixels*3 + int64(thumbEdge)*int64(thumbEdge)*4*2 + 8<<20
+	if progressive {
+		bytes += int64(w) * int64(h) * 3 * 4
+	}
+	return decodedPixels, bytes
 }
 
 // ---- per-format header readers ------------------------------------------

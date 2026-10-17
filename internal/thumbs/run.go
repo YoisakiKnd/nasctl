@@ -5,19 +5,28 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/YoisakiKnd/nasctl/internal/backupgate"
 	"github.com/YoisakiKnd/nasctl/internal/cachepath"
 	"github.com/YoisakiKnd/nasctl/internal/config"
+	"github.com/YoisakiKnd/nasctl/internal/exif"
+	"github.com/YoisakiKnd/nasctl/internal/fsutil"
+	"github.com/YoisakiKnd/nasctl/internal/jpegscale"
 	"github.com/YoisakiKnd/nasctl/internal/logx"
+	"github.com/YoisakiKnd/nasctl/internal/probe"
 	"github.com/YoisakiKnd/nasctl/internal/resource"
 	"github.com/YoisakiKnd/nasctl/internal/source"
 	"github.com/YoisakiKnd/nasctl/internal/store"
 	"github.com/YoisakiKnd/nasctl/internal/taskctl"
+	"github.com/YoisakiKnd/nasctl/internal/vips"
 )
 
 // RunOptions bound one thumbnail run.
@@ -96,6 +105,11 @@ type Runner struct {
 	// operator has configured no check, in which case the album task runs
 	// without coordination and says so in its report.
 	Backup *backupgate.Gate
+
+	vipsPath string
+	// statsMu guards the report's shared sampling statistics while several
+	// workers are supervised at once.
+	statsMu sync.Mutex
 }
 
 // Run performs one bounded thumbnail run.
@@ -355,94 +369,33 @@ func (r *Runner) loop(ctx context.Context, opts RunOptions, col config.Collectio
 		return "internal_error", "cannot locate the albumctl binary to spawn workers: " + err.Error()
 	}
 	stderrPath := filepath.Join(r.Cfg.Paths.StateDir, "worker.log")
+	r.vipsPath = vips.Find(r.Cfg.Formats.UseVips, r.Cfg.Formats.VipsPath)
+	if r.vipsPath != "" {
+		rep.Notes = append(rep.Notes, "PNG, WebP, TIFF, HEIC and AVIF thumbnails are made by libvips ("+r.vipsPath+")")
+	}
 
-	var processed int64
-	// firstIteration is tracked separately from `processed` so that a future
-	// path that skips a file without counting it cannot make the sustained-start
-	// hold run again for the next file.
-	firstIteration := true
-	for {
-		if ctx.Err() != nil {
-			return string(resource.ReasonOperatorStop), "interrupted by the operator"
-		}
-		if opts.Limit > 0 && processed >= int64(opts.Limit) {
-			return string(resource.ReasonLimitReached), fmt.Sprintf("processed %d files, the requested limit", processed)
-		}
-		if expired() {
-			return string(resource.ReasonMaxRuntime), fmt.Sprintf("the %s runtime budget elapsed after %d files",
-				opts.MaxRuntime, processed)
-		}
+	// Up to `parallel` workers run at once, sharing the worker cgroup. A file
+	// joins the files already running only when their estimated memory still
+	// fits the cgroup's ceiling; a large file waits and then runs alone.
+	parallel := r.parallelWorkers()
+	memBudget := r.Cfg.Guard.WorkerMemMaxMB << 20 * 8 / 10
+	type finished struct {
+		rec  *FileRecord
+		id   int64
+		cost int64
+	}
+	results := make(chan finished, parallel)
+	inflight := map[int64]int64{}
+	var inflightCost int64
 
-		// The gate is re-evaluated before every file, not once per batch. The
-		// first file of a run additionally has to clear the sustained-start
-		// hold, so a momentary lull cannot begin a batch.
-		var before resource.Decision
-		if firstIteration {
-			before = guard.AdmitStart(ctx)
-		} else {
-			before = guard.BeforeFile()
-		}
-		rep.Stats.Observe(before.Snapshot)
-		if before.Verdict != resource.Allow {
-			return string(before.Reason), before.Detail
-		}
-
-		pauseCheck, _ := r.Store.PauseState(ctx)
-		if pauseCheck.Paused {
-			return string(resource.ReasonPaused), "albumctl was paused while this run was in progress"
-		}
-
-		// The existing backup outranks the album. albumctl is the one that
-		// yields, and it yields by stopping - never by touching the backup.
-		if r.Cfg.Backup.SkipThumbsWhenBusy {
-			switch v := r.BackupVerdict(ctx); {
-			case v.Busy:
-				return string(resource.ReasonBackupBusy), v.Detail
-			case !v.Known && r.Cfg.Backup.RequireKnown:
-				return string(resource.ReasonNoBackupStatus),
-					"backup.require_known is set but the backup could not be asked: " + v.Detail
-			case !v.Known:
-				rep.Notes = append(rep.Notes,
-					"the backup was not consulted: "+v.Detail+
-						"; albumctl ran without coordinating with it")
-			}
-		}
-
-		refs, qerr := r.Store.NextThumb(ctx, colID, r.Cfg.Decode.MaxAttempts, store.UnixNow(), 1)
-		if qerr != nil {
-			return "store_error", qerr.Error()
-		}
-		if len(refs) == 0 {
-			return string(resource.ReasonExhausted),
-				"no pending thumbnails remain for this collection within the retry budget"
-		}
-		ref := refs[0]
-
-		out, err := cachepath.Path(r.Cfg.Paths.CacheDir, cachepath.Key(ref.CollectionCode, ref.RelPath),
-			r.Cfg.Decode.ThumbMaxEdge, r.Cfg.Cache.ShardDepth)
-		if err != nil {
-			return "internal_error", err.Error()
-		}
-
-		// Cache ceiling is checked before the work, not after. When the cache is
-		// full the run stops and says so; it never silently keeps growing.
-		est := r.estimatedThumbBytes()
-		if r.Cfg.Cache.MaxBytes > 0 && *cacheBytes+est > r.Cfg.Cache.MaxBytes {
-			return string(resource.ReasonCacheFull), fmt.Sprintf(
-				"the cache holds %s of a %s ceiling and adding more would exceed it; "+
-					"run `albumctl cache-report` and prune deliberately with `albumctl cache-gc`",
-				humanBytes(*cacheBytes), humanBytes(r.Cfg.Cache.MaxBytes))
-		}
-		if r.Cfg.Cache.MaxFiles > 0 && *cacheFiles >= int64(r.Cfg.Cache.MaxFiles) {
-			return string(resource.ReasonCacheFull), fmt.Sprintf(
-				"the cache holds %d files, at its configured ceiling of %d", *cacheFiles, r.Cfg.Cache.MaxFiles)
-		}
-
-		rec := r.runOne(ctx, opts, col, guard, sampler, cm, binary, stderrPath, ref, out, taskID, rep)
-		firstIteration = false
+	var processed, dispatched int64
+	var stop, stopText string
+	collect := func(f finished) {
+		delete(inflight, f.id)
+		inflightCost -= f.cost
 		processed++
 		rep.Processed++
-		if rec != nil {
+		if rec := f.rec; rec != nil {
 			switch rec.Outcome {
 			case StateOK:
 				rep.BytesWritten += rec.ThumbBytes
@@ -464,14 +417,207 @@ func (r *Runner) loop(ctx context.Context, opts RunOptions, col config.Collectio
 			opts.OnProgress(fmt.Sprintf("processed %d files: %d ok, %d skipped, %d failed",
 				processed, rep.Processed-int64(rep.Skipped)-int64(rep.Failed), rep.Skipped, rep.Failed))
 		}
-
 		// The design's stop-loss rule: a burst of failures means something
 		// systemic, so the run stops instead of grinding through the library.
-		if r.Cfg.Decode.MaxErrorStreak > 0 && rep.Failed >= int64(r.Cfg.Decode.MaxErrorStreak) &&
+		if stop == "" && r.Cfg.Decode.MaxErrorStreak > 0 && rep.Failed >= int64(r.Cfg.Decode.MaxErrorStreak) &&
 			rep.Processed-rep.Skipped == rep.Failed {
-			return string(resource.ReasonErrorStreak), fmt.Sprintf(
+			stop, stopText = string(resource.ReasonErrorStreak), fmt.Sprintf(
 				"the first %d files all failed; stopping rather than working through the library", rep.Failed)
 		}
+	}
+	// Whatever ends the run, the files already running finish first; each is
+	// still bounded by its own deadline and resource checks.
+	defer func() {
+		for len(inflight) > 0 {
+			collect(<-results)
+		}
+	}()
+
+	// firstIteration is tracked separately from `processed` so that a future
+	// path that skips a file without counting it cannot make the sustained-start
+	// hold run again for the next file.
+	firstIteration := true
+	for {
+		for drained := false; !drained; {
+			select {
+			case f := <-results:
+				collect(f)
+			default:
+				drained = true
+			}
+		}
+		if stop != "" {
+			return stop, stopText
+		}
+		if ctx.Err() != nil {
+			return string(resource.ReasonOperatorStop), "interrupted by the operator"
+		}
+		if opts.Limit > 0 && dispatched >= int64(opts.Limit) {
+			return string(resource.ReasonLimitReached), fmt.Sprintf("processed %d files, the requested limit", dispatched)
+		}
+		if expired() {
+			return string(resource.ReasonMaxRuntime), fmt.Sprintf("the %s runtime budget elapsed after %d files",
+				opts.MaxRuntime, dispatched)
+		}
+		if len(inflight) >= parallel {
+			collect(<-results)
+			continue
+		}
+
+		// The gate is re-evaluated before every file, not once per batch. The
+		// first file of a run additionally has to clear the sustained-start
+		// hold, so a momentary lull cannot begin a batch.
+		var before resource.Decision
+		if firstIteration {
+			before = guard.AdmitStart(ctx)
+		} else {
+			before = guard.BeforeFile()
+		}
+		r.statsMu.Lock()
+		rep.Stats.Observe(before.Snapshot)
+		r.statsMu.Unlock()
+		if before.Verdict != resource.Allow {
+			return string(before.Reason), before.Detail
+		}
+
+		pauseCheck, _ := r.Store.PauseState(ctx)
+		if pauseCheck.Paused {
+			return string(resource.ReasonPaused), "albumctl was paused while this run was in progress"
+		}
+
+		// The existing backup outranks the album. albumctl is the one that
+		// yields, and it yields by stopping - never by touching the backup.
+		if r.Cfg.Backup.SkipThumbsWhenBusy {
+			switch v := r.BackupVerdict(ctx); {
+			case v.Busy:
+				return string(resource.ReasonBackupBusy), v.Detail
+			case !v.Known && r.Cfg.Backup.RequireKnown:
+				return string(resource.ReasonNoBackupStatus),
+					"backup.require_known is set but the backup could not be asked: " + v.Detail
+			case !v.Known && firstIteration:
+				rep.Notes = append(rep.Notes,
+					"the backup was not consulted: "+v.Detail+
+						"; albumctl ran without coordinating with it")
+			}
+		}
+
+		refs, qerr := r.Store.NextThumb(ctx, colID, r.Cfg.Decode.MaxAttempts, store.UnixNow(), len(inflight)+1)
+		if qerr != nil {
+			return "store_error", qerr.Error()
+		}
+		var ref store.MediaRef
+		found := false
+		for _, candidate := range refs {
+			if _, running := inflight[candidate.ID]; !running {
+				ref, found = candidate, true
+				break
+			}
+		}
+		if !found {
+			if len(inflight) > 0 {
+				collect(<-results)
+				continue
+			}
+			return string(resource.ReasonExhausted),
+				"no pending thumbnails remain for this collection within the retry budget"
+		}
+
+		out, err := cachepath.Path(r.Cfg.Paths.CacheDir, cachepath.Key(ref.CollectionCode, ref.RelPath),
+			r.Cfg.Decode.ThumbMaxEdge, r.Cfg.Cache.ShardDepth)
+		if err != nil {
+			return "internal_error", err.Error()
+		}
+
+		// Cache ceiling is checked before the work, not after. When the cache is
+		// full the run stops and says so; it never silently keeps growing.
+		est := r.estimatedThumbBytes() * int64(len(inflight)+1)
+		if r.Cfg.Cache.MaxBytes > 0 && *cacheBytes+est > r.Cfg.Cache.MaxBytes {
+			return string(resource.ReasonCacheFull), fmt.Sprintf(
+				"the cache holds %s of a %s ceiling and adding more would exceed it; "+
+					"run `albumctl cache-report` and prune deliberately with `albumctl cache-gc`",
+				humanBytes(*cacheBytes), humanBytes(r.Cfg.Cache.MaxBytes))
+		}
+		if r.Cfg.Cache.MaxFiles > 0 && *cacheFiles+int64(len(inflight)) >= int64(r.Cfg.Cache.MaxFiles) {
+			return string(resource.ReasonCacheFull), fmt.Sprintf(
+				"the cache holds %d files, at its configured ceiling of %d", *cacheFiles, r.Cfg.Cache.MaxFiles)
+		}
+
+		cost := r.estimateCost(col, ref)
+		if len(inflight) > 0 && inflightCost+cost > memBudget {
+			// Wait for room; the same file is offered again next time round.
+			collect(<-results)
+			continue
+		}
+		inflight[ref.ID] = cost
+		inflightCost += cost
+		dispatched++
+		firstIteration = false
+		go func(ref store.MediaRef, out string, cost int64) {
+			rec := r.runOne(ctx, opts, col, guard, sampler, cm, binary, stderrPath, ref, out, taskID, rep)
+			results <- finished{rec: rec, id: ref.ID, cost: cost}
+		}(ref, out, cost)
+	}
+}
+
+func (r *Runner) parallelWorkers() int { return ParallelWorkers(r.Cfg.Decode.ThumbWorkers) }
+
+// ParallelWorkers is how many thumbnail workers may run at once: the
+// configured number, or two on machines with at least four cores.
+func ParallelWorkers(configured int) int {
+	if configured > 0 {
+		return configured
+	}
+	if runtime.NumCPU() >= 4 {
+		return 2
+	}
+	return 1
+}
+
+// estimateCost is the memory one file's worker is expected to need, read from
+// the file's header only. It decides whether the file may run beside others;
+// the worker still applies the real budget and the cgroup still enforces it.
+func (r *Runner) estimateCost(col config.Collection, ref store.MediaRef) int64 {
+	const runtimeBytes = 16 << 20 // the worker process itself
+	exclusive := r.Cfg.Guard.WorkerMemMaxMB << 20
+	path, err := fsutil.SafeRelJoin(col.Root, ref.RelPath)
+	if err == nil {
+		path, err = fsutil.ResolveWithin(col.Root, path)
+	}
+	if err != nil {
+		return exclusive
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return exclusive
+	}
+	defer f.Close()
+	head := make([]byte, 512)
+	n, _ := io.ReadFull(f, head)
+	format := exif.DetectFormat(head[:n])
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return exclusive
+	}
+	edge := r.Cfg.Decode.ThumbMaxEdge
+	switch {
+	case format == "jpeg":
+		info, err := jpegscale.Inspect(f)
+		if err != nil {
+			return exclusive
+		}
+		scale := jpegscale.ScaleFor(info.Width, info.Height, edge)
+		decoded := int64((info.Width*scale+7)/8) * int64((info.Height*scale+7)/8)
+		return runtimeBytes + decoded*3 + info.CoefficientBytes + int64(edge)*int64(edge)*8
+	case r.vipsPath != "":
+		// libvips decodes other formats at full size (HEIC, PNG) or streams
+		// them; give such files the worker to themselves.
+		return exclusive
+	default:
+		cfg, name, err := image.DecodeConfig(f)
+		if err != nil {
+			return exclusive
+		}
+		pixels := int64(cfg.Width) * int64(cfg.Height)
+		return runtimeBytes + probe.EstimateDecodeBytes(probe.KindImage, name, pixels, cfg.Width, cfg.Height, edge)
 	}
 }
 
@@ -504,6 +650,12 @@ func (r *Runner) runOne(ctx context.Context, opts RunOptions, col config.Collect
 		"--max-decode-mb", itoa(r.Cfg.Decode.MaxDecodeMemMB),
 		"--max-frames", itoa(int64(r.Cfg.Decode.MaxFrames)),
 		"--formats", r.formatNames(),
+	}
+	if r.vipsPath != "" {
+		args = append(args, "--vips", r.vipsPath)
+		if r.Cfg.Formats.VipsForJPEG {
+			args = append(args, "--vips-jpeg")
+		}
 	}
 	cgroupDir := ""
 	if cm != nil && cm.Active {
@@ -637,6 +789,8 @@ func (r *Runner) runOne(ctx context.Context, opts RunOptions, col config.Collect
 	// sampleOnce reads one snapshot and folds it into every accumulator.
 	sampleOnce := func() resource.Decision {
 		dec := guard.DuringFile(base, proc.PID)
+		r.statsMu.Lock()
+		defer r.statsMu.Unlock()
 		rep.Stats.Observe(dec.Snapshot)
 		if dec.Snapshot.Cgroup.Peak > peakCgroup {
 			peakCgroup = dec.Snapshot.Cgroup.Peak

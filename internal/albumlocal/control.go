@@ -25,6 +25,8 @@ import (
 	"github.com/YoisakiKnd/nasctl/internal/scan"
 	"github.com/YoisakiKnd/nasctl/internal/settingslocal"
 	"github.com/YoisakiKnd/nasctl/internal/store"
+	"github.com/YoisakiKnd/nasctl/internal/thumbs"
+	"github.com/YoisakiKnd/nasctl/internal/vips"
 	"golang.org/x/sys/unix"
 )
 
@@ -38,6 +40,25 @@ type Control struct {
 	busy            bool
 	launcher        *albumLauncher
 	private         []album.Folder
+	vipsOnce        sync.Once
+	vips            string
+}
+
+// vipsVersion reports the libvips the thumbnail workers will use, checked
+// once per process.
+func (c *Control) vipsVersion() string {
+	c.vipsOnce.Do(func() {
+		path := vips.Find(c.base.Formats.UseVips, c.base.Formats.VipsPath)
+		if path == "" {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if v, err := vips.Version(ctx, path); err == nil {
+			c.vips = strings.TrimPrefix(v, "vips-")
+		}
+	})
+	return c.vips
 }
 
 func NewControl(cfg *config.Config, fm *files.Manager, log *logx.Logger) (*Control, error) {
@@ -171,7 +192,7 @@ func privateFolders(cfg config.Config) []album.Folder {
 func (c *Control) Configuration() album.Configuration {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := album.Configuration{Directories: []album.Directory{}, Busy: c.busy}
+	out := album.Configuration{Directories: []album.Directory{}, Busy: c.busy, Vips: c.vipsVersion(), VipsForJPEG: c.base.Formats.VipsForJPEG, ThumbWorkers: thumbs.ParallelWorkers(c.base.Decode.ThumbWorkers)}
 	if info, err := os.Stat(c.binary); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0111 != 0 {
 		out.WorkerAvailable = true
 	}

@@ -130,20 +130,23 @@ type Guard struct {
 // Decode bounds media decoding. The estimate is a pre-filter; process isolation
 // is what actually protects the machine.
 type Decode struct {
-	MaxPixels       int64    `toml:"max_pixels"`
-	MaxFileBytes    int64    `toml:"max_file_bytes"`
-	MaxDecodeMemMB  int64    `toml:"max_decode_mem_mb"`
-	MaxFrames       int      `toml:"max_frames"`
-	PerFileTimeout  Duration `toml:"per_file_timeout"`
-	GracePeriod     Duration `toml:"grace_period"`
-	MaxAttempts     int      `toml:"max_attempts"`
-	RetryBackoff    Duration `toml:"retry_backoff"`
-	ThumbMaxEdge    int      `toml:"thumb_max_edge"`
-	ThumbQuality    int      `toml:"thumb_quality"`
-	MaxScanDepth    int      `toml:"max_scan_depth"`
-	MaxErrorStreak  int      `toml:"max_error_streak"`
-	ProbeMaxMetaLen int      `toml:"probe_max_metadata_bytes"`
-	WorkerLogTailKB int      `toml:"worker_log_tail_kb"`
+	MaxPixels      int64    `toml:"max_pixels"`
+	MaxFileBytes   int64    `toml:"max_file_bytes"`
+	MaxDecodeMemMB int64    `toml:"max_decode_mem_mb"`
+	MaxFrames      int      `toml:"max_frames"`
+	PerFileTimeout Duration `toml:"per_file_timeout"`
+	GracePeriod    Duration `toml:"grace_period"`
+	MaxAttempts    int      `toml:"max_attempts"`
+	RetryBackoff   Duration `toml:"retry_backoff"`
+	ThumbMaxEdge   int      `toml:"thumb_max_edge"`
+	ThumbQuality   int      `toml:"thumb_quality"`
+	// ThumbWorkers is how many thumbnail workers may run at once, sharing the
+	// worker memory ceiling. 0 picks two on machines with four or more cores.
+	ThumbWorkers    int `toml:"thumb_workers"`
+	MaxScanDepth    int `toml:"max_scan_depth"`
+	MaxErrorStreak  int `toml:"max_error_streak"`
+	ProbeMaxMetaLen int `toml:"probe_max_metadata_bytes"`
+	WorkerLogTailKB int `toml:"worker_log_tail_kb"`
 }
 
 // TimeCfg records the capture-time policy.
@@ -171,6 +174,16 @@ type Formats struct {
 	// VideoProbe reads duration/creation time out of the container with a
 	// bounded atom walk. No external tool, very little memory.
 	VideoProbe bool `toml:"video_probe"`
+
+	// UseVips hands PNG, WebP, TIFF, HEIC and AVIF thumbnails to libvips'
+	// `vips` tool when it is installed: it streams large images and reads the
+	// formats Go cannot. Without it nasctl uses its own decoders. VipsPath is
+	// a name looked up in PATH or an absolute path.
+	UseVips  bool   `toml:"use_vips"`
+	VipsPath string `toml:"vips_path"`
+	// VipsForJPEG also hands JPEG to libvips. Off by default: the built-in
+	// decoder shrinks JPEG while decoding and skips libvips' start-up cost.
+	VipsForJPEG bool `toml:"vips_for_jpeg"`
 }
 
 // Collection is one configured media directory.
@@ -361,6 +374,8 @@ func Default() Config {
 			WebP:               true,
 			VideoPoster:        false,
 			FFmpegPath:         "ffmpeg",
+			UseVips:            true,
+			VipsPath:           "vips",
 			VideoPosterTimeout: Duration{30 * time.Second},
 			VideoPosterSeek:    Duration{3 * time.Second},
 			VideoProbe:         true,
@@ -631,6 +646,9 @@ func (c *Config) Finalize() error {
 	if c.Decode.ThumbMaxEdge < 64 || c.Decode.ThumbMaxEdge > 2048 {
 		fail("decode.thumb_max_edge must be within 64..2048, got %d", c.Decode.ThumbMaxEdge)
 	}
+	if c.Decode.ThumbWorkers < 0 || c.Decode.ThumbWorkers > 4 {
+		fail("decode.thumb_workers must be within 0..4, got %d", c.Decode.ThumbWorkers)
+	}
 	if c.Decode.ThumbQuality < 40 || c.Decode.ThumbQuality > 95 {
 		fail("decode.thumb_quality must be within 40..95, got %d", c.Decode.ThumbQuality)
 	}
@@ -658,6 +676,9 @@ func (c *Config) Finalize() error {
 
 	if c.Formats.FFmpegPath == "" {
 		c.Formats.FFmpegPath = "ffmpeg"
+	}
+	if c.Formats.VipsPath == "" {
+		c.Formats.VipsPath = "vips"
 	}
 	if c.Formats.VideoPosterTimeout.D() <= 0 {
 		c.Formats.VideoPosterTimeout = Duration{30 * time.Second}

@@ -178,6 +178,10 @@ Field rules:
   is **not** converted to the viewer's timezone.
 * `taken_at` is `null` when no time could be determined.
 * `gps` is `null` unless the file really carried GPS EXIF. GPS is never guessed.
+* `orientation` is the EXIF orientation of the original (1–8, 0 when absent). Thumbnails
+  are already turned upright from it, so a client must **not** rotate `thumb_url` again.
+  Browsers apply it to `raw_url` themselves. `width` and `height` are the stored,
+  unrotated dimensions. (Before 0.6.0 thumbnails were stored unrotated.)
 * `placeholder` is `true` when this item cannot be thumbnailed (unsupported format or
   over budget) so the UI can render it as a tile with a glyph instead of an image.
 * `note` carries a short machine reason such as `unsupported_format` or

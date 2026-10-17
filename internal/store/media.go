@@ -982,3 +982,38 @@ func (s *Store) WaitForWriteIdle(ctx context.Context, timeout time.Duration) err
 		}
 	}
 }
+
+// RequeueSkipped returns rows an earlier, stricter policy skipped to the
+// queue, so they are probed and thumbnailed again under the current one:
+// files over a pixel or decode budget, files whose size was unknown, files a
+// worker refused for the same reasons, and - when extra formats are now
+// readable - files of those formats that were indexed as unsupported.
+func (s *Store) RequeueSkipped(ctx context.Context, collectionID int64, formats []string) (int64, error) {
+	if err := s.guard(); err != nil {
+		return 0, err
+	}
+	extra := "0"
+	args := []any{collectionID}
+	if len(formats) > 0 {
+		extra = "(probe_reason LIKE 'format_not_enabled:%' AND ext IN (?" + strings.Repeat(",?", len(formats)-1) + "))"
+		for _, f := range formats {
+			args = append(args, f)
+		}
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE media SET probe_state = 'pending', probe_attempts = 0, next_attempt_at = 0
+		 WHERE collection_id = ? AND probe_state = 'skipped' AND missing = 0
+		   AND (probe_reason LIKE 'over_pixel_budget%' OR probe_reason LIKE 'over_decode_budget%'
+		        OR probe_reason = 'dimensions_unknown' OR `+extra+`)`, args...)
+	if err != nil {
+		return 0, fmt.Errorf("store: requeue skipped probes: %w", err)
+	}
+	probes, _ := res.RowsAffected()
+	res, err = s.db.ExecContext(ctx, `UPDATE media SET thumb_state = 'pending', thumb_attempts = 0, next_attempt_at = 0
+		 WHERE collection_id = ? AND probe_state = 'ok' AND thumb_state = 'skipped' AND missing = 0
+		   AND (thumb_reason LIKE 'over_%' OR thumb_reason IN ('undecodable_header', 'format_not_enabled'))`, collectionID)
+	if err != nil {
+		return probes, fmt.Errorf("store: requeue skipped thumbnails: %w", err)
+	}
+	thumbs, _ := res.RowsAffected()
+	return probes + thumbs, nil
+}

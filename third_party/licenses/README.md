@@ -8,5 +8,6 @@ The WebDAV backup and anime source discovery implementations use these modules. 
 - golang.org/x/crypto v0.58.0 — https://go.googlesource.com/crypto
 
 - golang.org/x/net v0.61.0 — https://go.googlesource.com/net
+- Go standard library image/jpeg decoder (Go 1.27), adapted in internal/jpegscale to decode at reduced size — https://go.dev/src/image/jpeg (go-image-jpeg.txt)
 
-Upstream license texts accompany this notice. This directory describes the backup and source discovery dependencies, not the complete dependency inventory of nasctl.
+Upstream license texts accompany this notice. This directory describes the backup, source discovery and thumbnail decoder dependencies, not the complete dependency inventory of nasctl.

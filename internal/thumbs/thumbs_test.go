@@ -97,8 +97,12 @@ func TestGenerateProducesABoundedJPEG(t *testing.T) {
 			t.Errorf("%s: source is %d wide, thumbnail is %d wide; a thumbnail must never "+
 				"be larger than its source", rel, rec.Width, cfg.Width)
 		}
-		// Aspect ratio is preserved within rounding.
+		// Aspect ratio is preserved within rounding, after the photo is turned
+		// upright: IMG_0007 carries orientation 6, a quarter turn.
 		srcAR := float64(rec.Width) / float64(rec.Height)
+		if rel == "photos/2019/paris/IMG_0007.jpg" {
+			srcAR = 1 / srcAR
+		}
 		outAR := float64(cfg.Width) / float64(cfg.Height)
 		if diff := srcAR - outAR; diff > 0.02 || diff < -0.02 {
 			t.Errorf("%s: aspect ratio changed from %.3f to %.3f", rel, srcAR, outAR)

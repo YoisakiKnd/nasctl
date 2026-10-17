@@ -19,6 +19,7 @@ import (
 	"github.com/YoisakiKnd/nasctl/internal/source"
 	"github.com/YoisakiKnd/nasctl/internal/store"
 	"github.com/YoisakiKnd/nasctl/internal/taskctl"
+	"github.com/YoisakiKnd/nasctl/internal/vips"
 )
 
 // BatchMoreMarker ends the output of a scan or thumbnail run that stopped at
@@ -112,6 +113,14 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	if !opts.DryRun {
 		if err := r.Store.RecordMountCheck(ctx, colID, true, strings.Join(sc.Notes, "; "), sc.FSID, sc.RootDevice); err != nil {
 			return res, err
+		}
+	}
+
+	if !opts.DryRun {
+		if n, err := r.requeueForPolicy(ctx, col.Code, colID); err != nil {
+			res.Notes = append(res.Notes, err.Error())
+		} else if n > 0 {
+			res.Notes = append(res.Notes, fmt.Sprintf("%d files skipped under an earlier decode policy were queued again", n))
 		}
 	}
 
@@ -397,6 +406,44 @@ type probeTally struct {
 	Err     error
 }
 
+// budget is the decode budget probes are checked against.
+func (r *Runner) budget() probe.Budget {
+	return probe.Budget{
+		MaxPixels:      r.Cfg.Decode.MaxPixels,
+		MaxFileBytes:   r.Cfg.Decode.MaxFileBytes,
+		MaxDecodeBytes: r.Cfg.MaxDecodeBytes(),
+		MaxFrames:      r.Cfg.Decode.MaxFrames,
+		ThumbMaxEdge:   r.Cfg.Decode.ThumbMaxEdge,
+		Vips:           vips.Find(r.Cfg.Formats.UseVips, r.Cfg.Formats.VipsPath) != "",
+		VipsJPEG:       r.Cfg.Formats.VipsForJPEG,
+	}
+}
+
+// requeueForPolicy queues files skipped under a different decode policy, once
+// per policy change: a looser budget, scaled JPEG decoding or a newly
+// installed libvips can make them thumbnailable. Files that stay over the
+// budget are not probed again on every scan.
+func (r *Runner) requeueForPolicy(ctx context.Context, code string, colID int64) (int64, error) {
+	b := r.budget()
+	policy := fmt.Sprintf("2|%d|%d|%d|%d|%t|%t", b.MaxPixels, b.MaxFileBytes, b.MaxDecodeBytes, b.ThumbMaxEdge, b.Vips, b.Vips && b.VipsJPEG)
+	key := "decode_policy:" + code
+	if current, ok, err := r.Store.GetState(ctx, key); err != nil || ok && current == policy {
+		return 0, err
+	}
+	var formats []string
+	if b.Vips {
+		for ext := range vips.ExtraExtensions {
+			formats = append(formats, ext)
+		}
+		sort.Strings(formats)
+	}
+	n, err := r.Store.RequeueSkipped(ctx, colID, formats)
+	if err != nil {
+		return n, err
+	}
+	return n, r.Store.SetState(ctx, key, policy)
+}
+
 // probePending reads headers for files awaiting metadata.
 //
 // One row is fetched at a time and each iteration re-reads the pending set, so a
@@ -412,13 +459,7 @@ func (r *Runner) probePending(ctx context.Context, col config.Collection, colID 
 		MaxStringBytes: 512,
 		MaxKeys:        24,
 	}
-	budget := probe.Budget{
-		MaxPixels:      r.Cfg.Decode.MaxPixels,
-		MaxFileBytes:   r.Cfg.Decode.MaxFileBytes,
-		MaxDecodeBytes: r.Cfg.MaxDecodeBytes(),
-		MaxFrames:      r.Cfg.Decode.MaxFrames,
-		ThumbMaxEdge:   r.Cfg.Decode.ThumbMaxEdge,
-	}
+	budget := r.budget()
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 1 << 30

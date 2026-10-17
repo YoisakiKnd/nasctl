@@ -32,6 +32,7 @@ import (
 	"github.com/YoisakiKnd/nasctl/internal/store"
 	"github.com/YoisakiKnd/nasctl/internal/taskctl"
 	"github.com/YoisakiKnd/nasctl/internal/thumbs"
+	"github.com/YoisakiKnd/nasctl/internal/vips"
 	"github.com/YoisakiKnd/nasctl/internal/webstate"
 )
 
@@ -1373,6 +1374,8 @@ func runWorker(args []string, env Env) int {
 	maxDecodeMB := fs.Int64("max-decode-mb", 0, "")
 	maxFrames := fs.Int("max-frames", 1, "")
 	formats := fs.String("formats", "jpeg,png,gif,webp", "")
+	vipsPath := fs.String("vips", "", "absolute path of libvips' vips tool, or empty for the built-in decoders")
+	vipsJPEG := fs.Bool("vips-jpeg", false, "hand JPEG to libvips as well")
 	cgroupDir := fs.String("cgroup-dir", "", "the cgroup the supervisor placed this worker in")
 	handshake := fs.Bool("handshake", false, "wait for the supervisor's go-ahead before decoding")
 	maxRuntime := fs.Duration("max-runtime", 0, "internal deadline")
@@ -1396,6 +1399,8 @@ func runWorker(args []string, env Env) int {
 			MaxDecodeBytes: *maxDecodeMB << 20,
 			MaxFrames:      *maxFrames,
 			Formats:        thumbs.ParseFormats(*formats),
+			Vips:           vips.Find(*vipsPath != "" && filepath.IsAbs(*vipsPath), *vipsPath),
+			VipsJPEG:       *vipsJPEG,
 		},
 	}, env.Stdin, env.Stdout)
 	if err != nil {

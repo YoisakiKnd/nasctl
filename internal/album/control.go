@@ -30,6 +30,12 @@ type Configuration struct {
 	Directories     []Directory `json:"directories"`
 	WorkerAvailable bool        `json:"worker_available"`
 	Busy            bool        `json:"busy"`
+	// Vips is libvips' version when thumbnails can use it, or "".
+	Vips string `json:"vips"`
+	// VipsForJPEG reports that libvips also makes JPEG thumbnails.
+	VipsForJPEG bool `json:"vips_for_jpeg"`
+	// ThumbWorkers is how many thumbnail workers may run at once.
+	ThumbWorkers int `json:"thumb_workers"`
 }
 type Work struct {
 	Operation  string `json:"-"`

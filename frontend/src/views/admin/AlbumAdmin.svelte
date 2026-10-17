@@ -105,6 +105,7 @@
     </section>
     <section class="panel settings-card">
       <header class="settings-card-head"><span class="settings-card-icon"><Icon name="jobs" size={19}/></span><div><h2>处理相册</h2><p class="muted">扫描会走完整个目录，自动分批建立索引；缩略图同样分批生成。每批之间检查内存和运行模式，中途停止后再次开始会从剩下的文件继续。</p></div></header>
+      <p class="engine-line"><Icon name="info" size={15}/><span>{#if configuration.vips}缩略图：libvips {configuration.vips} 处理 {configuration.vips_for_jpeg ? 'JPEG、' : ''}PNG、WebP、TIFF、HEIC 和 AVIF{#if !configuration.vips_for_jpeg}，JPEG 用内置解码器缩小解码{/if}{:else}缩略图：内置解码器（JPEG 缩小解码，支持 JPEG、PNG、GIF、WebP）。安装 libvips-tools 后还能生成 HEIC、AVIF、TIFF 缩略图{/if} · 同时 {configuration.thumb_workers || 1} 个处理程序</span></p>
       {#if !configuration.worker_available}<p class="notice warning">相册处理程序不可用。请检查 nasctl 可执行文件或 hub.album.worker_binary 配置。</p>{/if}
       <div class="settings-fields work-fields">
         <label class="field">处理目录<select aria-label="相册处理集合" bind:value={workCollection}><option value="" disabled>选择目录</option>{#each directories.filter((item) => item.enabled) as item}<option value={item.code}>{item.name}{item.private ? '（私密）' : ''}</option>{/each}</select></label>
