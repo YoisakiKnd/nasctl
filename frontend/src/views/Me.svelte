@@ -32,7 +32,7 @@
     <h2 id="me-account" class="me-section-title">账号</h2>
     <div class="me-actions">
       {#if auth?.user_id}<div class="me-row"><span class="me-row-icon"><Icon name="lock" size={18}/></span><div><strong>登录密码</strong><p class="muted">修改后，该账号的所有会话都需要重新登录。</p></div><AccountPassword {auth} variant="button" oncomplete={onpassword}/></div>{/if}
-      {#if adminPages.length}<a class="me-row" href={'#' + adminPages[0].id}><span class="me-row-icon"><Icon name="settings" size={18}/></span><div><strong>管理后台</strong><p class="muted">{adminPages.length > 4 ? '存储、用户、备份与系统设置' : '任务、相册处理与追番订阅'}</p></div><Icon name="chevron" size={18}/></a>{/if}
+      {#if adminPages.length}<a class="me-row" href={'#' + adminPages[0].id}><span class="me-row-icon"><Icon name="settings" size={18}/></span><div><strong>管理设置</strong><p class="muted">{adminPages.length > 4 ? '存储、用户、备份与系统设置' : '任务、相册处理与追番订阅'}</p></div><Icon name="chevron" size={18}/></a>{/if}
       {#if auth?.required}<div class="me-row"><span class="me-row-icon danger"><Icon name="back" size={18}/></span><div><strong>退出登录</strong><p class="muted">退出后需要重新输入账号和密码。</p></div><button class="button secondary danger-text" disabled={pending} onclick={onlogout}>退出登录</button></div>{/if}
     </div>
   </section>

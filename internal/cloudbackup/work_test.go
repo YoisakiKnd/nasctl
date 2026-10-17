@@ -27,6 +27,8 @@ type davFixture struct {
 	lostMove bool
 	corrupt  bool
 	password string
+	// cdn, when set, answers GET with a redirect there, as 123 云盘 does.
+	cdn string
 }
 
 func (d *davFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -65,6 +67,12 @@ func (d *davFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		d.files[name] = b
 		w.WriteHeader(201)
 	case "GET":
+		if d.cdn != "" && r.URL.Query().Get("signed") == "" {
+			http.Redirect(w, r, d.cdn+r.URL.Path+"?signed=1", http.StatusFound)
+			return
+		}
+		fallthrough
+	case "GET-LOCAL":
 		b, ok := d.files[name]
 		if !ok {
 			w.WriteHeader(404)
@@ -413,5 +421,46 @@ func TestPendingVaultMovePreventsPlaintextUpload(t *testing.T) {
 	defer dav.mu.Unlock()
 	if len(dav.files) != 0 {
 		t.Fatal("pending original uploaded")
+	}
+}
+
+func TestDownloadsFollowCloudDriveRedirectsWithoutCredentials(t *testing.T) {
+	for _, mode := range []string{"direct", "encrypted"} {
+		t.Run(mode, func(t *testing.T) {
+			s, dav, source, destination, _ := cloudRig(t)
+			var leaked, served bool
+			cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "" {
+					leaked = true
+				}
+				dav.mu.Lock()
+				body, ok := dav.files[strings.TrimSuffix(r.URL.Path, "/")]
+				dav.mu.Unlock()
+				if !ok {
+					w.WriteHeader(404)
+					return
+				}
+				served = true
+				w.Write(body)
+			}))
+			defer cdn.Close()
+			dav.mu.Lock()
+			dav.cdn = cdn.URL
+			dav.mu.Unlock()
+			req := requestFor(s, mode)
+			r, e := s.Run(context.Background(), req, nil)
+			if e != nil || r.State != "complete" {
+				t.Fatalf("run through a redirecting server: %+v %v", r, e)
+			}
+			restored, e := s.Restore(context.Background(), r.ID, "destination", "restored", req.Password, nil)
+			if e != nil || !restored.Published {
+				t.Fatal(restored, e)
+			}
+			original, _ := os.ReadFile(filepath.Join(source, "photos/private-name.txt"))
+			body, _ := os.ReadFile(filepath.Join(destination, "restored/private-name.txt"))
+			if !bytes.Equal(body, original) || !served || leaked {
+				t.Fatalf("restore %q served=%v credentials sent to the CDN=%v", body, served, leaked)
+			}
+		})
 	}
 }

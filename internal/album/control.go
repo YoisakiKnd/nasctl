@@ -66,8 +66,9 @@ func ValidateWork(w Work) (time.Duration, error) {
 			return 0, errors.New("choose a collection and a file limit between 1 and 10000")
 		}
 		d, err := time.ParseDuration(w.MaxRuntime)
-		if err != nil || d < time.Second || d > 2*time.Hour {
-			return 0, errors.New("task runtime must be between 1s and 2h")
+		// The limit is per batch; the runtime bounds the whole series.
+		if err != nil || d < time.Second || d > 12*time.Hour {
+			return 0, errors.New("task runtime must be between 1s and 12h")
 		}
 		return d, nil
 	case "album.pause", "album.resume":

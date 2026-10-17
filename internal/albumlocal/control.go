@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,7 +22,9 @@ import (
 	"github.com/YoisakiKnd/nasctl/internal/files"
 	"github.com/YoisakiKnd/nasctl/internal/fsutil"
 	"github.com/YoisakiKnd/nasctl/internal/logx"
+	"github.com/YoisakiKnd/nasctl/internal/scan"
 	"github.com/YoisakiKnd/nasctl/internal/settingslocal"
+	"github.com/YoisakiKnd/nasctl/internal/store"
 	"golang.org/x/sys/unix"
 )
 
@@ -300,6 +303,9 @@ func (c *Control) save(dirs []album.Directory) error {
 	return nil
 }
 
+// batchPause separates batches so the resource guard sees the machine at rest.
+var batchPause = 2 * time.Second
+
 func (c *Control) Run(ctx context.Context, w album.Work, progress func(album.WorkProgress)) (result album.WorkResult, workErr error) {
 	duration, err := album.ValidateWork(w)
 	if err != nil {
@@ -350,18 +356,89 @@ func (c *Control) Run(ctx context.Context, w album.Work, progress func(album.Wor
 	if closeErr != nil {
 		return album.WorkResult{}, closeErr
 	}
+	ctx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
+	if w.Operation != "album.scan" && w.Operation != "album.thumbs" {
+		res, _, err := c.batch(ctx, w, name, progress)
+		return res, err
+	}
+	return c.batches(ctx, w, name, progress)
+}
+
+// batches runs one directory's scan or thumbnail work to the end as a series
+// of bounded worker runs. Each run handles at most w.Limit files and is
+// isolated and resource-checked as before; the series stops when a run
+// reports nothing left, on a failure, or when the runtime budget is spent.
+func (c *Control) batches(ctx context.Context, w album.Work, name string, progress func(album.WorkProgress)) (album.WorkResult, error) {
+	scanning := w.Operation == "album.scan"
+	before, _, _ := c.Reader.totals(ctx, w.Collection)
+	describe := func(n int, t store.Totals, probe int64) (int64, int64, string) {
+		if scanning {
+			return t.Media, 0, fmt.Sprintf("第 %d 批 · 已索引 %d 项，待读取信息 %d 项", n, t.Media, probe)
+		}
+		done := t.ThumbOK - before.ThumbOK
+		return done, done + t.ThumbDue, fmt.Sprintf("第 %d 批 · 已生成 %d 张缩略图，剩余 %d 张", n, done, t.ThumbDue)
+	}
+	for n := 1; ; n++ {
+		report := progress
+		if progress != nil {
+			report = func(p album.WorkProgress) {
+				queryCtx, stop := context.WithTimeout(ctx, time.Second)
+				defer stop()
+				if t, probe, ok := c.Reader.totals(queryCtx, w.Collection); ok {
+					p.Processed, p.Total, p.Detail = describe(n, t, probe)
+				}
+				progress(p)
+			}
+		}
+		res, more, err := c.batch(ctx, w, name, report)
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return album.WorkResult{StopReason: "max_runtime", Detail: "已达到本次最长运行时间，已处理的部分保留；再次开始会从剩下的文件继续"}, nil
+			}
+			return res, err
+		}
+		if !more {
+			summary := "整个目录已处理完"
+			if t, probe, ok := c.Reader.totals(ctx, w.Collection); ok {
+				_, _, line := describe(n, t, probe)
+				summary += "（" + line + "）"
+			}
+			return album.WorkResult{Completed: true, Detail: summary}, nil
+		}
+		select {
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return album.WorkResult{StopReason: "max_runtime", Detail: "已达到本次最长运行时间，已处理的部分保留；再次开始会从剩下的文件继续"}, nil
+			}
+			return album.WorkResult{StopReason: "interrupted", Detail: "相册任务已请求停止；已保存的索引和缩略图保留"}, ctx.Err()
+		case <-time.After(batchPause):
+		}
+	}
+}
+
+// batch runs the worker once and reports whether it stopped at its limit with
+// work left.
+func (c *Control) batch(ctx context.Context, w album.Work, name string, progress func(album.WorkProgress)) (result album.WorkResult, more bool, workErr error) {
 	args := []string{"album", strings.TrimPrefix(w.Operation, "album."), "--config", name}
 	if w.Operation == "album.scan" || w.Operation == "album.thumbs" {
 		args = append(args, "--collection", w.Collection, "--limit", strconv.Itoa(w.Limit))
 	}
 	if w.Operation == "album.thumbs" {
-		args = append(args, "--max-runtime", w.MaxRuntime)
+		// Each batch is bounded by its file limit; the series is bounded by
+		// the context, so a batch may use whatever time remains.
+		budget := time.Hour
+		if deadline, ok := ctx.Deadline(); ok {
+			budget = min(budget, time.Until(deadline))
+		}
+		if budget < time.Second {
+			return album.WorkResult{}, false, context.DeadlineExceeded
+		}
+		args = append(args, "--max-runtime", (time.Duration(math.Ceil(budget.Seconds())) * time.Second).String())
 	}
 	if w.Operation == "album.pause" && w.Reason != "" {
 		args = append(args, "--reason", w.Reason)
 	}
-	ctx, cancel := context.WithTimeout(ctx, duration)
-	defer cancel()
 	cmd := exec.CommandContext(ctx, c.binary, args...)
 	cmd.SysProcAttr = &unix.SysProcAttr{Setpgid: true}
 	// Let the existing album supervisor cancel/reap its isolated decoder first.
@@ -372,10 +449,11 @@ func (c *Control) Run(ctx context.Context, w album.Work, progress func(album.Wor
 	cmd.Stdout = output
 	cmd.Stderr = output
 	var launch *admittedLaunch
+	var err error
 	if w.Operation == "album.thumbs" {
 		launch, err = c.launcher.prepare(cmd)
 		if err != nil {
-			return album.WorkResult{StopReason: "isolation_unavailable"}, err
+			return album.WorkResult{StopReason: "isolation_unavailable"}, false, err
 		}
 		defer func() {
 			if e := launch.finish(); e != nil {
@@ -385,12 +463,12 @@ func (c *Control) Run(ctx context.Context, w album.Work, progress func(album.Wor
 		}()
 	}
 	if err = cmd.Start(); err != nil {
-		return album.WorkResult{}, errors.New("album worker could not start")
+		return album.WorkResult{}, false, errors.New("album worker could not start")
 	}
 	if err = launch.admit(cmd.Process.Pid); err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
-		return album.WorkResult{StopReason: "isolation_unavailable"}, fmt.Errorf("album worker could not enter the delegated task cgroup: %w", err)
+		return album.WorkResult{StopReason: "isolation_unavailable"}, false, fmt.Errorf("album worker could not enter the delegated task cgroup: %w", err)
 	}
 	report := func() {
 		if progress == nil {
@@ -426,16 +504,17 @@ waiting:
 		report()
 	}
 	if ctx.Err() != nil {
-		return album.WorkResult{StopReason: "interrupted", Detail: "相册任务已请求停止；已保存的索引和缩略图保留"}, ctx.Err()
+		return album.WorkResult{StopReason: "interrupted", Detail: "相册任务已请求停止；已保存的索引和缩略图保留"}, false, ctx.Err()
 	}
 	if err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
-			return album.WorkResult{StopReason: fmt.Sprintf("worker_exit_%d", exit.ExitCode()), Detail: output.String()}, fmt.Errorf("album task stopped (exit %d): %s", exit.ExitCode(), output.String())
+			return album.WorkResult{StopReason: fmt.Sprintf("worker_exit_%d", exit.ExitCode()), Detail: output.String()}, false, fmt.Errorf("album task stopped (exit %d): %s", exit.ExitCode(), output.String())
 		}
-		return album.WorkResult{}, errors.New("album worker could not start")
+		return album.WorkResult{}, false, errors.New("album worker could not start")
 	}
-	return album.WorkResult{Completed: true, Detail: output.String()}, nil
+	text := output.String()
+	return album.WorkResult{Completed: true, Detail: text}, strings.Contains(text, scan.BatchMoreMarker), nil
 }
 
 type boundedOutput struct {

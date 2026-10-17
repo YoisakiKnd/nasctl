@@ -65,9 +65,9 @@ func (e *RemoteError) hint() string {
 	switch {
 	case e.Status >= 300 && e.Status < 400:
 		if e.Method == http.MethodGet {
-			return "nasctl 不跟随跳转。下载被跳转到别处（AList 等网盘网关常见的直链）时无法回读校验，请关闭该服务的直链跳转，或改用直接存储文件的 WebDAV。"
+			return "下载被跳转了 5 次以上、跳转到了带账号信息的地址，或从 https 跳转到 http（未允许 HTTP 时）。nasctl 只跟随最多 5 次指向 https 的下载跳转，请检查 WebDAV 服务的直链设置。"
 		}
-		return "nasctl 不跟随跳转。请把 WebDAV 地址改成跳转后的地址（注意 http/https 和末尾的 /）。"
+		return "上传、建目录等写操作不跟随跳转，以免文件被发到别处。请把 WebDAV 地址改成跳转后的地址（注意 http/https 和末尾的 /）。"
 	case e.Status == 401:
 		return "账号或密码不正确，请在连接设置中重新填写。"
 	case e.Status == 403:

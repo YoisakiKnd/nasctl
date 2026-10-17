@@ -1,35 +1,42 @@
 /* Design tokens. Dark values apply for an explicit dark choice and, before the
    app has chosen, whenever the system prefers dark - so the first paint matches. */
 :root {
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
   font-size:14px; line-height:1.6; font-synthesis:none; text-rendering:optimizeLegibility;
   color-scheme:light;
-  --bg:#f5f7fa; --surface:#fff; --surface-soft:#f3f5f8; --surface-hover:#eaf0f8;
-  --border:#e2e6ed; --border-strong:#929cac; --text:#1a2030; --muted:#5b6478; --subtle:#657087;
-  --accent:#2563eb; --accent-hover:#1d4ed8; --accent-soft:#e9f0ff; --on-accent:#fff;
-  --success:#2f7d4f; --success-bg:#edf5ed; --warning:#9a5b00; --warning-bg:#fbf2df; --error:#b42318; --error-bg:#fbeeea;
-  --shadow:none; --shadow-raised:0 6px 20px rgb(16 24 40/.08); --dialog-shadow:0 12px 32px rgb(16 24 40/.16);
+  /* Nextcloud-like palette: one primary blue, neutral greys, a blue wallpaper behind rounded app areas. */
+  --bg:#f5f5f5; --surface:#fff; --surface-soft:#f6f6f7; --surface-hover:#ededed;
+  --border:#e4e4e4; --border-input:#d6d6d6; --border-strong:#8f8f8f; --text:#222; --muted:#5c5c5c; --subtle:#6f6f6f;
+  --accent:#0082c9; --accent-hover:#006aa3; --accent-soft:#e3f1fa; --accent-text:#00679f; --on-accent:#fff;
+  --success:#2d7b41; --success-bg:#e8f5ec; --warning:#946200; --warning-bg:#fdf3dc; --error:#c42e2e; --error-bg:#fdecec;
+  --shadow:none; --shadow-raised:0 2px 10px rgb(0 0 0/.08); --dialog-shadow:0 12px 40px rgb(0 0 0/.22);
   --radius-sm:8px; --radius:12px; --radius-lg:16px;
-  --header-height:60px; --tabbar-height:58px; --sidebar-width:232px;
+  --header-height:50px; --tabbar-height:58px; --sidebar-width:280px;
+  --wallpaper:radial-gradient(900px 500px at 12% -10%,#3fb0f0 0%,transparent 60%),radial-gradient(800px 600px at 100% 110%,#1c5fa8 0%,transparent 55%),linear-gradient(150deg,#0a8fd8 0%,#0076bb 45%,#0a5c9c 100%);
+  --nav-glass:rgb(255 255 255/.82); --nav-hover:rgb(0 0 0/.055);
   --file-paper:#f9fbff; --file-paper-border:#cbd4df; --file-fold:#e7edf5;
 }
 :root[data-theme="dark"] {
   color-scheme:dark;
-  --bg:#141824; --surface:#1b2130; --surface-soft:#222a3b; --surface-hover:#2b3549;
-  --border:#313b4f; --border-strong:#71809b; --text:#e8ecf4; --muted:#a9b3c6; --subtle:#9aa4b8;
-  --accent:#79a9ff; --accent-hover:#99bdff; --accent-soft:#25395c; --on-accent:#102449;
-  --success:#5dbb80; --success-bg:#20352a; --warning:#e0a040; --warning-bg:#362d1e; --error:#f0786a; --error-bg:#382523;
-  --shadow-raised:0 6px 20px #0006; --dialog-shadow:0 12px 32px #0008;
+  --bg:#121212; --surface:#1c1c1c; --surface-soft:#242424; --surface-hover:#2e2e2e;
+  --border:#333; --border-input:#454545; --border-strong:#8a8a8a; --text:#ececec; --muted:#b4b4b4; --subtle:#999;
+  --accent:#3c9fe3; --accent-hover:#62b3ec; --accent-soft:#11314a; --accent-text:#7cc2f2; --on-accent:#05243a;
+  --success:#6cc685; --success-bg:#1d3324; --warning:#e5aa45; --warning-bg:#382c17; --error:#f17d7d; --error-bg:#3a2020;
+  --shadow-raised:0 2px 10px #0008; --dialog-shadow:0 12px 40px #000a;
+  --wallpaper:radial-gradient(900px 500px at 12% -10%,#0f4e7a 0%,transparent 60%),linear-gradient(150deg,#0b3554 0%,#0a2740 50%,#08192a 100%);
+  --nav-glass:rgb(28 28 28/.78); --nav-hover:rgb(255 255 255/.07);
   --file-paper:#303c51; --file-paper-border:#667791; --file-fold:#475771;
 }
 @media (prefers-color-scheme:dark) {
   :root:not([data-theme]) {
     color-scheme:dark;
-    --bg:#141824; --surface:#1b2130; --surface-soft:#222a3b; --surface-hover:#2b3549;
-    --border:#313b4f; --border-strong:#71809b; --text:#e8ecf4; --muted:#a9b3c6; --subtle:#9aa4b8;
-    --accent:#79a9ff; --accent-hover:#99bdff; --accent-soft:#25395c; --on-accent:#102449;
-    --success:#5dbb80; --success-bg:#20352a; --warning:#e0a040; --warning-bg:#362d1e; --error:#f0786a; --error-bg:#382523;
-    --shadow-raised:0 6px 20px #0006; --dialog-shadow:0 12px 32px #0008;
+    --bg:#121212; --surface:#1c1c1c; --surface-soft:#242424; --surface-hover:#2e2e2e;
+    --border:#333; --border-input:#454545; --border-strong:#8a8a8a; --text:#ececec; --muted:#b4b4b4; --subtle:#999;
+    --accent:#3c9fe3; --accent-hover:#62b3ec; --accent-soft:#11314a; --accent-text:#7cc2f2; --on-accent:#05243a;
+    --success:#6cc685; --success-bg:#1d3324; --warning:#e5aa45; --warning-bg:#382c17; --error:#f17d7d; --error-bg:#3a2020;
+    --shadow-raised:0 2px 10px #0008; --dialog-shadow:0 12px 40px #000a;
+    --wallpaper:radial-gradient(900px 500px at 12% -10%,#0f4e7a 0%,transparent 60%),linear-gradient(150deg,#0b3554 0%,#0a2740 50%,#08192a 100%);
+    --nav-glass:rgb(28 28 28/.78); --nav-hover:rgb(255 255 255/.07);
     --file-paper:#303c51; --file-paper-border:#667791; --file-fold:#475771;
   }
 }
@@ -411,7 +418,7 @@ body.modal-open {overflow:hidden;}
 .finder-group-label {font-size:10px;color:var(--muted);margin:15px 9px 7px;font-weight:550;}
 .finder-location {width:100%;padding:8px 9px;min-height:34px;border:0;border-radius:7px;background:none;display:flex;gap:10px;align-items:center;text-align:left;font-size:12px;flex-shrink:0;}
 .finder-location:hover {background:var(--surface-hover);}
-.finder-location.active {background:#2563eb;color:white;}
+
 .finder-location>span:last-child:not(.location-name) {margin-left:auto;font-size:10px;}
 .location-name {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1;}
 .finder-sidebar-foot {margin-top:auto;padding:24px 8px 0;display:flex;gap:6px;align-items:center;color:var(--subtle);font-size:9px;}
@@ -424,7 +431,7 @@ body.modal-open {overflow:hidden;}
 .finder-path>span {font-size:11px;}
 .finder-view-toggle {display:flex;flex-shrink:0;gap:2px;padding:2px;border:1px solid var(--border);border-radius:8px;}
 .finder-view-toggle>button {display:grid;place-items:center;background:transparent;border:0;border-radius:5px;width:27px;height:25px;}
-.finder-view-toggle>button.active {background:#2563eb;color:white;}
+.finder-view-toggle>button.active {background:var(--accent);color:var(--on-accent);}
 .finder-toolbar .icon-button.active {color:var(--accent);background:var(--accent-soft);}
 .finder-heading {padding:20px 20px 13px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-shrink:0;}
 .finder-heading>div {min-width:0;}
@@ -872,59 +879,6 @@ body.modal-open {overflow:hidden;}
   .source-search-row button {width:100%}
 }
 
-/* ---- Application shell ------------------------------------------------------
-   User pages: top navigation on wide screens, a bottom tab bar on phones.
-   Admin pages: a left sidebar that becomes a drawer below 1024px. Every visited
-   page stays mounted in one <main>; only the chrome around it changes. */
-.shell {min-height:100dvh; display:grid; background:var(--bg);}
-.shell.fill {height:100dvh; overflow:hidden;}
-.shell-main {grid-area:main; min-width:0; min-height:0; outline:none; position:relative;}
-.shell.fill .shell-main {overflow:hidden;}
-.page[hidden] {display:none;}
-.page>.content {max-width:1200px; margin:0 auto; padding:28px 32px 56px; min-width:0; container-type:inline-size; container-name:application;}
-.page-fill {height:100%;}
-.page-fill>.content {max-width:none; height:100%; padding:0; overflow:hidden;}
-.brand-mark {display:grid; place-items:center; width:32px; height:32px; border-radius:10px; background:linear-gradient(135deg,#4f8bff,#2563eb); color:#fff; flex-shrink:0;}
-:root[data-theme="dark"] .brand-mark {background:linear-gradient(135deg,#5b8fe8,#3360c9);}
-.avatar {width:34px; height:34px; border-radius:50%; display:grid; place-items:center; border:1px solid var(--border); background:var(--accent-soft); color:var(--accent); font-size:13px; font-weight:650; flex-shrink:0;}
-.avatar:hover {border-color:var(--accent);}
-.avatar.large {width:56px; height:56px; font-size:22px;}
-.theme-sun {display:none;}
-:root[data-theme="dark"] .theme-sun {display:block;}
-:root[data-theme="dark"] .theme-moon {display:none;}
-
-/* User shell */
-.user-shell {grid-template-rows:auto 1fr auto; grid-template-areas:"header" "main" "tabs";}
-.app-header {grid-area:header; position:sticky; top:0; z-index:20; height:var(--header-height); display:flex; align-items:center; gap:28px; padding:0 max(24px,calc((100vw - 1200px)/2 + 32px)); background:var(--surface); border-bottom:1px solid var(--border);}
-.brand {display:flex; align-items:center; gap:10px; font-size:18px; font-weight:700; letter-spacing:-.4px; color:var(--text);}
-.primary-nav {display:flex; align-items:center; gap:4px; flex:1; min-width:0;}
-.primary-nav .nav-link {min-height:36px; padding:6px 14px; gap:7px; border-radius:999px; font-size:13px; font-weight:550; color:var(--muted);}
-.primary-nav .nav-link:hover {background:var(--surface-hover); color:var(--text);}
-.primary-nav .nav-link.active {background:var(--accent-soft); color:var(--accent);}
-.header-actions {display:flex; align-items:center; gap:8px; margin-left:auto;}
-.admin-entry {display:inline-flex; align-items:center; gap:6px; height:34px; padding:0 13px; border:1px solid var(--border); border-radius:999px; font-size:12px; font-weight:550; color:var(--muted); background:var(--surface);}
-.admin-entry:hover {color:var(--accent); border-color:var(--accent);}
-.tab-bar {grid-area:tabs; display:none;}
-
-/* Admin shell */
-.admin-shell {grid-template-columns:var(--sidebar-width) minmax(0,1fr); grid-template-rows:56px 1fr; grid-template-areas:"side top" "side main";}
-.admin-sidebar {grid-area:side; position:sticky; top:0; height:100dvh; display:flex; flex-direction:column; gap:6px; padding:18px 14px; background:var(--surface); border-right:1px solid var(--border); overflow-y:auto; z-index:30;}
-.sidebar-brand {display:flex; align-items:center; gap:10px; padding:2px 8px 18px; font-size:17px; font-weight:700; letter-spacing:-.3px;}
-.sidebar-badge {margin-left:auto; font-size:11px; font-weight:550; color:var(--accent); background:var(--accent-soft); padding:2px 8px; border-radius:999px; letter-spacing:0;}
-.sidebar-nav {display:grid; gap:2px;}
-.sidebar-group {font-size:11px; font-weight:600; color:var(--subtle); letter-spacing:1.2px; padding:16px 12px 6px;}
-.sidebar-nav .nav-link {min-height:40px; padding:8px 12px; gap:11px; border-radius:var(--radius-sm); font-size:13px; color:var(--muted);}
-.sidebar-nav .nav-link:hover {background:var(--surface-hover); color:var(--text);}
-.sidebar-nav .nav-link.active {background:var(--accent-soft); color:var(--accent); font-weight:600;}
-.sidebar-exit {margin-top:auto; display:flex; align-items:center; gap:9px; padding:10px 12px; border-radius:var(--radius-sm); font-size:13px; color:var(--muted); border:1px solid var(--border);}
-.sidebar-exit:hover {color:var(--accent); border-color:var(--accent);}
-.admin-topbar {grid-area:top; position:sticky; top:0; z-index:20; display:flex; align-items:center; gap:12px; padding:0 28px; background:color-mix(in srgb,var(--bg) 92%,transparent); border-bottom:1px solid var(--border);}
-.topbar-title {display:flex; align-items:center; gap:6px; flex:1; min-width:0; font-size:13px; color:var(--subtle); white-space:nowrap; overflow:hidden;}
-.topbar-title a:hover {color:var(--accent);}
-.topbar-title strong {color:var(--text); font-weight:600; overflow:hidden; text-overflow:ellipsis;}
-.admin-topbar .system-status {padding:5px 11px; border:1px solid var(--border); border-radius:999px; background:var(--surface);}
-.drawer-toggle,.drawer-scrim {display:none;}
-
 /* Dialogs belong to their page and cover the viewport while it is shown. */
 .window-modal-layer {position:fixed; inset:0; z-index:60; background:rgb(10 16 30/.42); display:flex; align-items:center; justify-content:center; padding:16px;}
 .window-modal-layer dialog {position:relative; margin:0; max-width:100%; max-height:100%; box-shadow:var(--dialog-shadow);}
@@ -980,13 +934,6 @@ a.me-row:hover {background:var(--surface-soft); border-radius:var(--radius-sm);}
 .me-row p {font-size:12px; margin-top:2px;}
 .danger-text {color:var(--error)!important;}
 
-/* Album: the section switcher sits under the toolbar; the shell owns the bottom edge. */
-.page[data-page="album"]>.content {background:var(--surface);}
-.album-view>.photo-toolbar {order:0;}
-.album-view>.photo-tabs {order:1; justify-content:flex-start; gap:4px; padding:0 22px 10px; border-top:0; border-bottom:1px solid var(--border);}
-.album-view>.photo-library,.album-view>.vault-view,.album-view>:not(.photo-toolbar):not(.photo-tabs) {order:2;}
-.album-view>.photo-tabs button {flex-direction:row; gap:7px; min-height:34px; min-width:0; padding:0 14px; border-radius:999px; font-size:12px;}
-.album-view>.photo-tabs button.chosen {background:var(--accent-soft);}
 .photo-menu a {display:flex; align-items:center; gap:10px;}
 .album-admin {display:grid; gap:16px;}
 .album-admin>.album-control-section {padding:0 23px 22px; margin:0;}
@@ -1030,38 +977,6 @@ button.avatar {padding:0; cursor:pointer;}
 .inline-error .error-detail pre {background:var(--error-bg);}
 .cloud-record .inline-error>.error-body>p {color:var(--error); font-size:12px;}
 .cloud-record .error-detail pre {font-size:11px;}
-
-@media(max-width:1023px) {
-  .admin-shell {grid-template-columns:minmax(0,1fr); grid-template-areas:"top" "main";}
-  .admin-sidebar {position:fixed; inset:0 auto 0 0; width:min(84vw,var(--sidebar-width)); transform:translateX(-102%); transition:transform .2s ease; box-shadow:var(--dialog-shadow);}
-  .admin-sidebar.open {transform:none;}
-  .drawer-toggle {display:inline-flex;}
-  .drawer-scrim {display:block; position:fixed; inset:0; z-index:25; border:0; padding:0; background:rgb(10 16 30/.4);}
-  .admin-topbar {padding:0 16px 0 10px;}
-  .home-grid {grid-template-columns:1fr;}
-}
-@media(max-width:767px) {
-  .app-header {gap:12px; padding:0 16px; height:54px;}
-  .primary-nav,.admin-entry span {display:none;}
-  .admin-entry {padding:0; width:34px; justify-content:center;}
-  .tab-bar {display:flex; position:sticky; bottom:0; z-index:20; justify-content:space-around; height:calc(var(--tabbar-height) + env(safe-area-inset-bottom)); padding-bottom:env(safe-area-inset-bottom); background:var(--surface); border-top:1px solid var(--border);}
-  .tab-bar a {flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; font-size:11px; color:var(--subtle);}
-  .tab-bar a.active {color:var(--accent); font-weight:600;}
-  .page>.content {padding:20px 16px 32px;}
-  .page-fill>.content {padding:0;}
-  .home {gap:22px;}
-  .home-hero h1 {font-size:23px;}
-  .home-search {width:100%;}
-  .photo-strip {grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px;}
-  .photo-strip>:nth-child(n+9) {display:none;}
-  .admin-topbar .system-status {display:none;}
-  .album-view>.photo-tabs {padding:0 16px 8px;}
-  .window-modal-layer {padding:0;}
-  .window-modal-layer dialog {padding:20px 16px;}
-}
-@media(prefers-reduced-motion:reduce) {
-  .admin-sidebar,.photo-thumb img {transition:none;}
-}
 
 /* ---- Forms and settings --------------------------------------------------
    One vocabulary for every settings surface: cards with an icon header,
@@ -1299,3 +1214,190 @@ details.settings-card .key-values {grid-template-columns:130px 1fr; margin:0;}
 /* Subscription cards: cover on top-left, actions wrap in a tidy row. */
 .subscription-card {align-items:flex-start;}
 .subscription-card .card-actions {flex-wrap:wrap; gap:4px 18px;}
+
+
+/* ---- Shell ---------------------------------------------------------------
+   Nextcloud style: a transparent header over the wallpaper with the apps in
+   it, and below it one rounded app area. Apps with their own navigation put
+   a translucent list on its left; content is opaque. Pages scroll inside the
+   app area; on phones the apps move to a bottom tab bar. */
+.shell {height:100dvh; display:grid; grid-template-rows:var(--header-height) minmax(0,1fr) auto; background:var(--wallpaper); background-attachment:fixed; overflow:hidden;}
+.app-header {position:relative; z-index:20; display:flex; align-items:center; gap:6px; padding:0 12px 0 14px; color:#fff;}
+.brand {display:flex; align-items:center; gap:9px; margin-right:18px; color:#fff; font-size:17px; font-weight:700; letter-spacing:-.3px;}
+.brand-mark {display:grid; place-items:center; width:30px; height:30px; border-radius:9px; background:rgb(255 255 255/.18); color:#fff; flex-shrink:0;}
+.primary-nav {display:flex; align-items:center; gap:2px; flex:1; min-width:0; height:100%;}
+.primary-nav .nav-link {position:relative; display:flex; align-items:center; gap:7px; height:38px; min-height:0; padding:0 13px; border-radius:999px; color:rgb(255 255 255/.86); font-size:14px; font-weight:560;}
+.primary-nav .nav-link:hover {background:rgb(255 255 255/.14); color:#fff;}
+.primary-nav .nav-link.active {background:rgb(255 255 255/.22); color:#fff; font-weight:650;}
+.header-actions {display:flex; align-items:center; gap:4px; margin-left:auto;}
+.app-header .icon-button {width:38px; height:38px; border-radius:50%; color:#fff;}
+.app-header .icon-button:hover {background:rgb(255 255 255/.16); color:#fff;}
+.admin-entry {display:inline-flex; align-items:center; gap:6px; height:38px; padding:0 13px; border:0; border-radius:999px; background:none; color:rgb(255 255 255/.88); font-size:14px; font-weight:560;}
+.admin-entry:hover {background:rgb(255 255 255/.14); color:#fff;}
+.admin-entry.active {background:rgb(255 255 255/.22); color:#fff;}
+.app-header .avatar {width:34px; height:34px; margin-left:4px; border:2px solid rgb(255 255 255/.7); background:rgb(255 255 255/.92); color:var(--accent-text,#00679f); font-size:13px; font-weight:700;}
+:root[data-theme="dark"] .app-header .avatar {color:#00679f;}
+.app-header .avatar:hover {border-color:#fff;}
+.app-header .vault-pill {background:rgb(255 255 255/.18); border-color:rgb(255 255 255/.35); color:#fff;}
+.app-header .vault-pill:hover {background:rgb(255 255 255/.28); border-color:#fff;}
+.avatar {width:34px; height:34px; border-radius:50%; display:grid; place-items:center; border:1px solid var(--border); background:var(--accent-soft); color:var(--accent-text); font-size:13px; font-weight:650; flex-shrink:0;}
+.avatar.large {width:60px; height:60px; font-size:24px;}
+.theme-sun {display:none;}
+:root[data-theme="dark"] .theme-sun {display:block;}
+:root[data-theme="dark"] .theme-moon {display:none;}
+
+.app-container {position:relative; display:flex; min-height:0; margin:0 8px 8px; border-radius:var(--radius); overflow:hidden; box-shadow:0 0 0 1px rgb(0 0 0/.04),0 4px 24px rgb(0 0 0/.12);}
+.shell-main {flex:1; min-width:0; min-height:0; overflow:auto; outline:none; position:relative; background:var(--surface);}
+.shell.fill .shell-main {overflow:hidden;}
+.settings-shell .shell-main {overflow:auto;}
+.page[hidden] {display:none;}
+.page>.content {max-width:1180px; margin:0 auto; padding:30px 36px 56px; min-width:0; container-type:inline-size; container-name:application;}
+.page-fill {height:100%;}
+.page-fill>.content {max-width:none; height:100%; padding:0; overflow:hidden;}
+
+/* App navigation: translucent, pill-shaped entries. */
+.app-navigation {width:var(--sidebar-width); flex-shrink:0; display:flex; flex-direction:column; gap:1px; padding:10px 8px; overflow-y:auto; background:var(--nav-glass); backdrop-filter:blur(24px) saturate(1.4); -webkit-backdrop-filter:blur(24px) saturate(1.4); border-right:1px solid rgb(0 0 0/.05); z-index:2;}
+.app-navigation .nav-link,.finder-location,.album-view>.photo-tabs button {display:flex; align-items:center; gap:11px; min-height:40px; height:auto; padding:7px 14px; border:0; border-radius:999px; background:none; color:var(--text); font-size:14px; font-weight:450; text-align:left; width:100%;}
+.app-navigation .nav-link svg,.finder-location svg,.album-view>.photo-tabs button svg {color:var(--muted); width:20px; height:20px;}
+.app-navigation .nav-link:hover,.finder-location:hover:not(:disabled),.album-view>.photo-tabs button:hover {background:var(--nav-hover); color:var(--text);}
+.app-navigation .nav-link.active,.finder-location.active,.album-view>.photo-tabs button.chosen {background:var(--accent-soft); color:var(--accent-text); font-weight:620;}
+.app-navigation .nav-link.active svg,.finder-location.active svg,.album-view>.photo-tabs button.chosen svg {color:var(--accent-text);}
+.sidebar-nav {display:grid; gap:1px;}
+.sidebar-group {margin:0; padding:16px 14px 6px; font-size:12px; font-weight:650; color:var(--subtle); letter-spacing:.2px;}
+.app-navigation>.sidebar-group:first-child {padding-top:6px;}
+.navigation-foot {display:grid; gap:8px; margin-top:auto; padding:12px 6px 4px;}
+.navigation-foot .system-status {padding:0 8px; font-size:12px;}
+.sidebar-exit {display:flex; align-items:center; gap:10px; min-height:38px; padding:0 14px; border-radius:999px; color:var(--muted); font-size:13px; border:0;}
+.sidebar-exit:hover {background:var(--nav-hover); color:var(--text);}
+.drawer-toggle,.drawer-scrim {display:none;}
+.tab-bar {display:none;}
+
+/* Settings pages read like Nextcloud's: flat sections divided by rules. */
+.settings-shell .page>.content {max-width:980px; margin:0; padding:28px 40px 60px;}
+.settings-card {background:none; border:0; border-radius:0; box-shadow:none; padding:26px 0; margin:0; border-bottom:1px solid var(--border);}
+.settings-card:last-child {border-bottom:0;}
+.settings-card-head h2 {font-size:18px; font-weight:700;}
+.settings-card-icon {background:var(--accent-soft); color:var(--accent-text); border-radius:50%;}
+.settings-nav {position:sticky; top:0; z-index:6; display:flex; flex-wrap:wrap; gap:6px; margin:0 0 6px; padding:10px 0; background:var(--surface); border-bottom:1px solid var(--border);}
+.settings-nav button {flex-shrink:0; min-height:32px; padding:4px 13px; border:1px solid var(--border); border-radius:999px; background:var(--surface); color:var(--muted); font-size:13px; white-space:nowrap;}
+.settings-nav button.active {border-color:var(--accent); background:var(--accent-soft); color:var(--accent-text);}
+.settings-layout {display:block;}
+.save-bar {bottom:12px;}
+
+/* Controls */
+.button {min-height:36px; padding:7px 16px; border-radius:999px; font-size:13px; font-weight:620;}
+.button.small {min-height:32px; padding:5px 13px; font-size:13px;}
+.button.primary {box-shadow:none;}
+.button.secondary {background:var(--surface-soft); border-color:transparent; color:var(--text);}
+.button.secondary:hover:not(:disabled) {background:var(--surface-hover); border-color:transparent;}
+input:not([type="checkbox"]):not([type="radio"]),select,textarea {min-height:38px; border:2px solid var(--border-input); border-radius:10px; padding:7px 12px; font-size:14px; background-color:var(--surface);}
+input:not([type="checkbox"]):not([type="radio"]):hover,select:hover {border-color:var(--accent);}
+input:not([type="checkbox"]):not([type="radio"]):focus-visible,select:focus-visible,textarea:focus-visible {border-color:var(--accent); box-shadow:none; outline:2px solid color-mix(in srgb,var(--accent) 25%,transparent); outline-offset:0;}
+select {padding-right:34px; background-position:right 12px center;}
+.panel {border-radius:var(--radius); border-color:var(--border);}
+.page-heading h1 {font-size:24px; font-weight:700; letter-spacing:-.4px;}
+.badge {border-radius:999px; padding:2px 9px;}
+.notice {border-radius:var(--radius);}
+.segmented button.active {color:var(--accent-text); border-bottom-color:var(--accent);}
+.text-button {color:var(--accent-text);}
+.status-dot {background:var(--success);}
+
+/* Dialogs belong to their page and cover the viewport while it is shown. */
+.window-modal-layer {background:rgb(0 0 0/.45);}
+dialog {border-radius:var(--radius-lg);}
+
+/* Photos: the section list is the app navigation on wide screens. */
+.page[data-page="album"]>.content {background:var(--surface);}
+.album-view {display:grid; grid-template-columns:var(--sidebar-width) minmax(0,1fr); grid-template-rows:auto minmax(0,1fr); --gutter:28px;}
+.album-view>.photo-tabs {grid-column:1; grid-row:1/3; order:0; display:flex; flex-direction:column; align-items:stretch; justify-content:flex-start; gap:1px; padding:10px 8px; border:0; border-right:1px solid rgb(0 0 0/.05); background:var(--nav-glass);}
+.album-view>.photo-toolbar {grid-column:2; grid-row:1; order:0; padding:18px var(--gutter) 6px;}
+.album-view>.photo-library,.album-view>.photo-vault,.album-view>:not(.photo-toolbar):not(.photo-tabs) {grid-column:2; grid-row:2; order:0; min-height:0; overflow:auto;}
+.album-view>.photo-tabs button {justify-content:flex-start; min-width:0;}
+.photo-title h1 {font-size:24px; font-weight:700;}
+.photo-month .album-gallery {margin:0 var(--gutter);}
+
+/* Files: the location list becomes the app navigation. */
+.finder-sidebar {width:var(--sidebar-width); background:var(--nav-glass); border-right:1px solid rgb(0 0 0/.05); padding:10px 8px;}
+.finder-sidebar-brand {padding:6px 8px 10px;}
+.finder-group-label {font-size:12px; font-weight:650; color:var(--subtle); margin:14px 14px 6px; letter-spacing:.2px;}
+.finder-location {font-size:14px;}
+.finder-location .status-dot {margin-left:auto;}
+.finder-tabs {background:var(--surface);}
+
+@media(max-width:1023px) {
+  .home-grid {grid-template-columns:1fr;}
+  .settings-shell .app-navigation {position:fixed; inset:0 auto 0 0; z-index:40; width:min(84vw,300px); background:var(--surface); transform:translateX(-102%); transition:transform .2s ease; box-shadow:var(--dialog-shadow);}
+  .settings-shell .app-navigation.open {transform:none;}
+  .settings-shell .drawer-toggle {display:inline-flex;}
+  .drawer-scrim {display:block; position:fixed; inset:0; z-index:35; border:0; padding:0; background:rgb(0 0 0/.4);}
+  .settings-shell .page>.content {padding:24px 24px 48px;}
+  .album-view {grid-template-columns:200px minmax(0,1fr);}
+}
+@media(max-width:767px) {
+  .shell {grid-template-rows:52px minmax(0,1fr) auto;}
+  .app-header {padding:0 8px 0 10px; gap:2px;}
+  .brand {margin-right:auto; font-size:16px;}
+  .primary-nav,.admin-entry span,.theme-toggle {display:none;}
+  .admin-entry {width:38px; padding:0; justify-content:center;}
+  .app-container {margin:0; border-radius:var(--radius) var(--radius) 0 0;}
+  .tab-bar {display:flex; z-index:20; justify-content:space-around; height:calc(var(--tabbar-height) + env(safe-area-inset-bottom)); padding-bottom:env(safe-area-inset-bottom); background:var(--surface); border-top:1px solid var(--border);}
+  .tab-bar a {flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; font-size:11px; color:var(--subtle);}
+  .tab-bar a.active {color:var(--accent-text); font-weight:650;}
+  .page>.content,.settings-shell .page>.content {padding:20px 16px 32px;}
+  .page-fill>.content {padding:0;}
+  .home {gap:22px;}
+  .home-hero h1 {font-size:23px;}
+  .home-search {width:100%;}
+  .photo-strip {grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px;}
+  .photo-strip>:nth-child(n+9) {display:none;}
+  .window-modal-layer {padding:0;}
+  .window-modal-layer dialog {padding:20px 16px;}
+  .album-view {display:flex; flex-direction:column; --gutter:16px;}
+  .album-view>.photo-tabs {order:1; flex-direction:row; justify-content:flex-start; gap:4px; padding:0 12px 8px; border:0; border-bottom:1px solid var(--border); background:none; overflow-x:auto;}
+  .album-view>.photo-tabs button {width:auto; flex-shrink:0; min-height:34px; padding:0 13px; font-size:13px;}
+  .album-view>.photo-toolbar {order:0; padding:12px var(--gutter) 6px;}
+  .album-view>.photo-library,.album-view>:not(.photo-toolbar):not(.photo-tabs) {order:2; flex:1;}
+  .finder-sidebar {background:var(--surface);}
+}
+@media(prefers-reduced-motion:reduce) {
+  .app-navigation,.photo-thumb img {transition:none;}
+}
+
+/* Translucent app navigation needs the wallpaper behind it: pages paint
+   their own content area instead of the shell. */
+.shell-main {background:transparent;}
+.page {min-height:100%; background:var(--surface);}
+.page-fill {background:transparent;}
+.page[data-page="album"]>.content,.album-view {background:transparent;}
+.album-view>:not(.photo-tabs) {background:var(--surface);}
+.file-explorer {background:transparent; font-size:14px;}
+.finder-main,.finder-tabs {background:var(--surface);}
+.finder-layout {background:transparent;}
+.finder-sidebar-foot {font-size:12px;}
+
+/* Fields that sit inside a search box have no border of their own. */
+.home-search input,.finder-search input,.search-field input,.photo-search input {border:0!important; min-height:0!important; padding:8px 0!important; background:none!important; outline:none!important; border-radius:0!important;}
+.finder-search {border-radius:999px; background:var(--surface-soft); border:2px solid transparent;}
+.finder-search:focus-within {border-color:var(--accent);}
+.home-search {border-radius:999px; border:2px solid var(--border-input); box-shadow:none;}
+.home-search:focus-within {border-color:var(--accent); outline:none;}
+.home-search .button {border-radius:999px;}
+
+/* Files: Nextcloud-sized text. */
+.finder-action {font-size:13px; padding:6px 10px; border-radius:999px;}
+.finder-action:hover:not(:disabled) {background:var(--surface-hover);}
+.finder-grid .entry-label {font-size:13px;}
+.finder-grid small,.finder-entry-time,.finder-entry-size,.finder-entry-kind {font-size:12px;}
+.finder-list .entry-label {font-size:13px;}
+.finder-list>.finder-entry {min-height:44px; border-radius:8px;}
+.finder-heading h1 {font-size:22px; font-weight:700;}
+.finder-heading span {font-size:12px;}
+.finder-details-content dl,.finder-details-content .button {font-size:12px;}
+.finder-details-content h2 {font-size:15px;}
+.finder-path button {font-size:13px;}
+.finder-entry.selected {background:var(--accent-soft);}
+@media(max-width:767px) {
+  .settings-nav {flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; margin:0 -16px 6px; padding:10px 16px;}
+}
+
+.work-fields {grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr));}

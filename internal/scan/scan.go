@@ -21,6 +21,10 @@ import (
 	"github.com/YoisakiKnd/nasctl/internal/taskctl"
 )
 
+// BatchMoreMarker ends the output of a scan or thumbnail run that stopped at
+// its limit with work left, so a supervisor running batches knows to go on.
+const BatchMoreMarker = "nasctl-batch: more"
+
 // Runner performs a bounded scan.
 type Runner struct {
 	Cfg   *config.Config
@@ -31,8 +35,10 @@ type Runner struct {
 // Options bound one scan.
 type Options struct {
 	CollectionCode string
-	// Limit bounds how many files are discovered and how many pending files are
-	// probed. It is applied to each phase independently.
+	// Limit bounds how many files are indexed (new, changed or deferred) and how
+	// many pending files are probed, each phase independently. Files the index
+	// already holds unchanged do not count, so repeated runs with the same limit
+	// work through a large library instead of stopping at its first files.
 	Limit  int
 	DryRun bool
 	// MaxRuntime stops the run after this elapsed time. Zero means no limit.
@@ -58,10 +64,12 @@ type Result struct {
 	MarkedMissing  int64
 	Complete       bool
 	StopReason     string
-	SourceCheck    source.Check
-	Sample         []string
-	Notes          []string
-	Duration       time.Duration
+	// More reports that a limit, not the end of the work, stopped this run.
+	More        bool
+	SourceCheck source.Check
+	Sample      []string
+	Notes       []string
+	Duration    time.Duration
 }
 
 // Run executes the scan.
@@ -149,9 +157,14 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 		if ctx.Err() != nil {
 			return StopWalk()
 		}
-		if opts.Limit > 0 && discovered >= int64(opts.Limit) {
+		counted := discovered
+		if !opts.DryRun {
+			counted = res.Inserted + res.Changed + res.Deferred
+		}
+		if opts.Limit > 0 && counted >= int64(opts.Limit) {
 			res.Complete = false
 			res.StopReason = "limit_reached"
+			res.More = true
 			return StopWalk()
 		}
 		if expired() {
@@ -190,6 +203,9 @@ func (r *Runner) Run(ctx context.Context, opts Options) (*Result, error) {
 	if !opts.DryRun {
 		pr := r.probePending(ctx, col, colID, opts, expired)
 		res.Probed, res.ProbeSkipped, res.ProbeFailed, res.ProbeAttempted = pr.OK, pr.Skipped, pr.Failed, pr.Count
+		if opts.Limit > 0 && pr.Count >= int64(opts.Limit) {
+			res.More = true
+		}
 		if pr.Err != nil {
 			res.Notes = append(res.Notes, pr.Err.Error())
 		}

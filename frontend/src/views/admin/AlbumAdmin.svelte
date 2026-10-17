@@ -10,9 +10,12 @@
   let { readOnly = true, canConfigure = true } = $props();
   let status = $state(null), listing = $state(null), configuration = $state(null), roots = $state([]), pending = $state(false), loading = $state(true), controlError = $state(''), controlMessage = $state(''), editorError = $state('');
   let code = $state(''), directoryName = $state(''), directoryRoot = $state(''), directoryPath = $state(''), enabled = $state(true), sharedVolume = $state(false), privateDirectory = $state(false), wasPrivate = $state(false), editing = $state(false), editorOpen = $state(false), removing = $state(null);
-  let workCollection = $state(''), workLimit = $state(50), workRuntime = $state('10m'), jobID = $state(''), taskRunning = $state(false);
+  let workCollection = $state(''), workRuntime = $state('12h'), jobID = $state(''), taskRunning = $state(false), chained = $state(false);
   let disposed = false;
-  const runtimes = [['5m','5 分钟'],['10m','10 分钟'],['30m','30 分钟'],['1h','1 小时'],['2h','2 小时']];
+  // The whole directory is processed in batches; the runtime caps one run,
+  // and starting again continues with what is left.
+  const runtimes = [['12h','直到处理完（最长 12 小时）'],['6h','最长 6 小时'],['2h','最长 2 小时'],['30m','最长 30 分钟']];
+  const batchSize = {scan:500, thumbs:50};
   const directories = $derived(configuration?.directories || []);
   const privateCount = $derived(directories.filter((item) => item.private).length);
   const busy = $derived(pending || taskRunning || Boolean(configuration?.busy));
@@ -59,15 +62,15 @@
   }
   async function startWork(operation) {
     if (pending || taskRunning) return; pending = true; controlError = ''; controlMessage = '';
-    const input = ['scan','thumbs'].includes(operation) ? {collection:workCollection,limit:workLimit,max_runtime:workRuntime} : operation === 'pause' ? {reason:'由相册操作者暂停'} : {};
+    const input = ['scan','thumbs'].includes(operation) ? {collection:workCollection,limit:batchSize[operation],max_runtime:workRuntime} : operation === 'pause' ? {reason:'由相册操作者暂停'} : {};
     try {const accepted = await api('/api/v1/album/tasks/' + operation,json('POST',input,{headers:{'X-Nasctl-Confirm':'1'}})); if (disposed) return; jobID = accepted.job_id; taskRunning = true;}
     catch (failure) {if (!disposed) controlError = failure.message;} finally {if (!disposed) pending = false;}
   }
   onMount(() => {load(); return () => {disposed = true;};});
 </script>
-<header class="page-heading"><div><h1>相册管理</h1><p class="muted">照片目录、私密目录与限量处理任务。浏览照片请前往<a class="text-button" href="#album">相册</a>。</p></div><button class="button secondary" disabled={loading || pending} onclick={load}><Icon name="refresh" size={16}/>刷新</button></header>
+<header class="page-heading"><div><h1>相册管理</h1><p class="muted">照片目录、私密目录与相册处理。浏览照片请前往<a class="text-button" href="#album">相册</a>。</p></div><button class="button secondary" disabled={loading || pending} onclick={load}><Icon name="refresh" size={16}/>刷新</button></header>
 <div class="album-admin">
-{#if jobID}<section class="panel task-panel"><TaskMonitor id={jobID} onsettled={() => {taskRunning = false; load();}}/><a class="text-button" href="#admin/jobs">在任务中心查看</a></section>{/if}
+{#if jobID}<section class="panel task-panel">{#key jobID}<TaskMonitor id={jobID} onsettled={(job) => {taskRunning = false; load(); if (chained) {chained = false; if (job?.state === 'completed') startWork('thumbs');}}}/>{/key}<a class="text-button" href="#admin/jobs">在任务中心查看</a></section>{/if}
 {#if controlMessage}<p class="notice success" role="status">{controlMessage}</p>{/if}
 {#if loading && !status}<p class="loading-state" role="status">正在读取相册设置…</p>
 {:else if status && !status.configured}<section class="empty-state panel"><Icon name="album" size={40}/><h2>相册已停用</h2><p>在配置文件中将 hub.album.mode 设为 local 后即可使用。</p></section>
@@ -101,14 +104,13 @@
       {#if !canConfigure}<p class="field-help settings-card-foot">目录配置由管理员管理，下方可执行限量任务。</p>{/if}
     </section>
     <section class="panel settings-card">
-      <header class="settings-card-head"><span class="settings-card-icon"><Icon name="jobs" size={19}/></span><div><h2>限量处理</h2><p class="muted">扫描先建立索引，再按需生成缩略图。任务受运行模式、内存和挂载检查限制。</p></div></header>
+      <header class="settings-card-head"><span class="settings-card-icon"><Icon name="jobs" size={19}/></span><div><h2>处理相册</h2><p class="muted">扫描会走完整个目录，自动分批建立索引；缩略图同样分批生成。每批之间检查内存和运行模式，中途停止后再次开始会从剩下的文件继续。</p></div></header>
       {#if !configuration.worker_available}<p class="notice warning">相册处理程序不可用。请检查 nasctl 可执行文件或 hub.album.worker_binary 配置。</p>{/if}
       <div class="settings-fields work-fields">
         <label class="field">处理目录<select aria-label="相册处理集合" bind:value={workCollection}><option value="" disabled>选择目录</option>{#each directories.filter((item) => item.enabled) as item}<option value={item.code}>{item.name}{item.private ? '（私密）' : ''}</option>{/each}</select></label>
-        <label class="field">每次最多处理<input aria-label="相册任务限额" type="number" min="1" max="10000" bind:value={workLimit}/><small class="field-help">1–10000 个文件</small></label>
-        <label class="field">最长运行时间<select aria-label="相册任务时限" bind:value={workRuntime}>{#each runtimes as [value,label]}<option {value}>{label}</option>{/each}</select></label>
+        <label class="field">运行时间<select aria-label="相册任务时限" bind:value={workRuntime}>{#each runtimes as [value,label]}<option {value}>{label}</option>{/each}</select></label>
       </div>
-      <div class="settings-card-actions"><button class="button primary" disabled={busy || !configuration.worker_available || !workCollection} onclick={() => startWork('scan')}>确认限量扫描</button><button class="button secondary" disabled={busy || !configuration.worker_available || !workCollection} onclick={() => startWork('thumbs')}>确认生成缩略图</button><span class="spacer"></span><button class="button secondary" disabled={busy || !configuration.worker_available} onclick={() => startWork(status?.paused ? 'resume' : 'pause')}>{status?.paused ? '恢复处理许可' : '暂停后续处理'}</button></div>
+      <div class="settings-card-actions"><button class="button primary" disabled={busy || !configuration.worker_available || !workCollection} onclick={() => {chained = true; startWork('scan');}}>扫描并生成缩略图</button><button class="button secondary" disabled={busy || !configuration.worker_available || !workCollection} onclick={() => startWork('scan')}>只扫描</button><button class="button secondary" disabled={busy || !configuration.worker_available || !workCollection} onclick={() => startWork('thumbs')}>只生成缩略图</button><span class="spacer"></span><button class="button secondary" disabled={busy || !configuration.worker_available} onclick={() => startWork(status?.paused ? 'resume' : 'pause')}>{status?.paused ? '恢复处理许可' : '暂停后续处理'}</button></div>
     </section>
   {/if}
 {/if}

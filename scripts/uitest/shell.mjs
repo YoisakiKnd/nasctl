@@ -32,7 +32,7 @@ try{
   check(d.querySelectorAll('.page').length===1,'only the visited page is mounted');
 
   await go('admin/anime');await wait(()=>button('添加订阅',page('admin/anime'))&&!button('添加订阅',page('admin/anime')).disabled,'anime management ready');
-  check(d.querySelector('.admin-sidebar')&&!d.querySelector('.app-header'),'admin pages use the sidebar');
+  check(d.querySelector('.admin-sidebar')&&d.querySelector('.app-header .primary-nav'),'admin pages keep the header and add the settings navigation');
   button('添加订阅',page('admin/anime')).click();await wait(()=>page('admin/anime').querySelector('dialog[open]'),'editor');
   const title=page('admin/anime').querySelector('input[name="title"]');title.value='Unsaved shell draft';title.dispatchEvent(new w.Event('input',{bubbles:true}));await delay(0);
   check(page('admin/anime').querySelector('.window-modal-layer')&&!d.body.classList.contains('modal-open'),'the editor belongs to its page instead of the whole document');
@@ -55,9 +55,15 @@ try{
   const avatar=d.querySelector('.app-header button.avatar');check(avatar,'header avatar is a menu button');
   avatar.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
   await wait(()=>d.querySelector('.menu [role="menuitem"]'),'account menu opens from the keyboard');
-  check([...d.querySelectorAll('.menu [role="menuitem"]')].some((node)=>node.textContent.includes('管理后台'))&&[...d.querySelectorAll('.menu [role="menuitemradio"]')].length===3,'menu offers the account page, admin area and three themes');
+  check([...d.querySelectorAll('.menu [role="menuitem"]')].some((node)=>node.textContent.includes('管理设置'))&&[...d.querySelectorAll('.menu [role="menuitemradio"]')].length===3,'menu offers the account page, admin area and three themes');
   [...d.querySelectorAll('.menu [role="menuitem"]')].find((node)=>node.textContent.includes('账号与外观')).click();
   await wait(()=>active()==='me','menu item opens the account page');
+  // Opening the admin area from the menu must not leave the page unclickable.
+  avatar.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+  await wait(()=>d.querySelector('.menu [role="menuitem"]'),'account menu opens again');
+  [...d.querySelectorAll('.menu [role="menuitem"]')].find((node)=>node.textContent.includes('管理设置')).click();
+  await wait(()=>active()==='admin'&&!d.querySelector('.menu'),'menu item opens the admin area and closes');await delay(50);
+  check(w.getComputedStyle(d.body).pointerEvents!=='none','the page stays clickable after leaving through the menu');
   await go('me');check(button('深色',page('me')),'theme choices are on the account page');
   button('深色',page('me')).click();await delay(0);check(d.documentElement.dataset.theme==='dark'&&w.localStorage.getItem('nasctl-theme')==='dark','explicit dark theme is applied and remembered');
   button('跟随系统',page('me')).click();await delay(0);check(d.documentElement.dataset.theme==='light'&&w.localStorage.getItem('nasctl-theme')===null,'following the system forgets the explicit choice');

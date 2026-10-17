@@ -247,7 +247,7 @@ func Declarations() []operations.Operation {
 		{
 			ID: "album.scan", Summary: "Bounded directory and metadata scan",
 			Scope: []string{"collection"}, Class: domain.RiskBounded, Approval: domain.ApprovalPreauthorised,
-			Timeout: 2 * time.Hour, Async: true, Mutex: operations.MutexScan,
+			Timeout: 12*time.Hour + 5*time.Minute, Async: true, Mutex: operations.MutexScan,
 			Params: []operations.Param{
 				{Name: "collection", Kind: operations.ParamString, Required: true, MaxLen: 32},
 				{Name: "limit", Kind: operations.ParamInt, Required: true,
@@ -259,7 +259,7 @@ func Declarations() []operations.Operation {
 		{
 			ID: "album.thumbs", Summary: "Bounded thumbnail generation batch",
 			Scope: []string{"collection"}, Class: domain.RiskBounded, Approval: domain.ApprovalPreauthorised,
-			Timeout: 2 * time.Hour, Async: true, Mutex: operations.MutexAlbum,
+			Timeout: 12*time.Hour + 5*time.Minute, Async: true, Mutex: operations.MutexAlbum,
 			Params: []operations.Param{
 				{Name: "collection", Kind: operations.ParamString, Required: true, MaxLen: 32},
 				{Name: "limit", Kind: operations.ParamInt, Required: true},

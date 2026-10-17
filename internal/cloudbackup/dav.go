@@ -43,7 +43,51 @@ func (s *Store) request(ctx context.Context, c Connection, method, rel string, b
 		}
 		return nil, networkFailure(method, rel, e)
 	}
+	if method == http.MethodGet {
+		return s.followDownload(ctx, c, rel, res)
+	}
 	return res, nil
+}
+
+// maxDownloadRedirects bounds the hops a download may take.
+const maxDownloadRedirects = 5
+
+// followDownload follows redirects for downloads only. Cloud drives such as
+// 123 云盘 and gateways such as AList answer GET with a redirect to a signed
+// CDN link; the bytes read there are still checked against the SHA-256
+// recorded at upload. The WebDAV credentials go only to the configured
+// server's own origin, never to the redirect target, and a redirect may not
+// downgrade to plain HTTP unless the connection allows HTTP. Every other
+// method keeps refusing redirects, so an upload can never be sent elsewhere.
+func (s *Store) followDownload(ctx context.Context, c Connection, rel string, res *http.Response) (*http.Response, error) {
+	origin, _ := url.Parse(c.URL)
+	for hops := 0; ; hops++ {
+		switch res.StatusCode {
+		case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		default:
+			return res, nil
+		}
+		target, e := res.Request.URL.Parse(res.Header.Get("Location"))
+		if hops >= maxDownloadRedirects || res.Header.Get("Location") == "" || e != nil || target.User != nil || !(target.Scheme == "https" || target.Scheme == "http" && c.AllowHTTP) {
+			// Left for the caller, which explains the redirect it could not follow.
+			return res, nil
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 8192))
+		res.Body.Close()
+		req, e := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+		if e != nil {
+			return nil, ErrRemote
+		}
+		if target.Scheme == origin.Scheme && target.Host == origin.Host && (c.Username != "" || c.Password != "") {
+			req.SetBasicAuth(c.Username, c.Password)
+		}
+		if res, e = s.client.Do(req); e != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, networkFailure(http.MethodGet, rel, e)
+		}
+	}
 }
 
 // finish accepts one of the allowed statuses and otherwise explains the

@@ -68,7 +68,7 @@ func TestAlbumOperatorConfigurationValidationAndAudit(t *testing.T) {
 	if code != 400 {
 		t.Fatal("unknown field", code)
 	}
-	for _, input := range []string{`{"collection":"photos","limit":0,"max_runtime":"1s"}`, `{"collection":"photos","limit":1,"max_runtime":"3h"}`, `{"collection":"photos","limit":1,"max_runtime":"1s","Operation":"album.resume"}`} {
+	for _, input := range []string{`{"collection":"photos","limit":0,"max_runtime":"1s"}`, `{"collection":"photos","limit":1,"max_runtime":"13h"}`, `{"collection":"photos","limit":1,"max_runtime":"1s","Operation":"album.resume"}`} {
 		code, _ = fileRequest(t, r, "POST", "/api/v1/album/tasks/scan", input, "", "", true)
 		if code != 400 {
 			t.Fatal(input, code)

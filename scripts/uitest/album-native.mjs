@@ -13,7 +13,7 @@ function input(label,value){const node=d.querySelector(`[aria-label="${label}"]`
 w.fetch=request;w.AbortController=AbortController;w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
 w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
 const admin=()=>d.querySelector('.page[data-page="admin/album"]');
-async function manage(){button('相册更多操作').click();await delay(0);d.querySelector('.photo-menu a[href="#admin/album"]').click();w.location.hash='admin/album';await wait(()=>admin()&&!admin().hidden&&button('添加目录',admin())&&button('确认限量扫描',admin()),'album management page');}
+async function manage(){button('相册更多操作').click();await delay(0);d.querySelector('.photo-menu a[href="#admin/album"]').click();w.location.hash='admin/album';await wait(()=>admin()&&!admin().hidden&&button('添加目录',admin())&&button('只扫描',admin()),'album management page');}
 const editor=()=>admin().querySelector('form.album-directory-form');
 try{
  const state=await(await request('/api/v1/album/status')).json();check(state.mode==='local'&&state.connected&&state.index_ready,'native reader uses the existing local index');

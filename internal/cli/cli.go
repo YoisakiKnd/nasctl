@@ -700,6 +700,9 @@ func cmdScan(ctx context.Context, cfg *config.Config, env Env, args []string) in
 		return 1
 	}
 	fmt.Fprint(env.Stdout, res.HumanReport())
+	if res.More {
+		fmt.Fprintln(env.Stdout, scan.BatchMoreMarker)
+	}
 	if res.StopReason != "" && res.StopReason != "limit_reached" && res.StopReason != "exhausted" {
 		return 1
 	}
@@ -760,6 +763,9 @@ func cmdThumbs(ctx context.Context, cfg *config.Config, env Env, args []string) 
 		return 1
 	}
 	fmt.Fprint(env.Stdout, rep.ResourceReport())
+	if rep.StopReason == string(resource.ReasonLimitReached) {
+		fmt.Fprintln(env.Stdout, scan.BatchMoreMarker)
+	}
 	return thumbsExitCode(rep.StopReason)
 }
 

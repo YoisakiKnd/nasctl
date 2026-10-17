@@ -126,6 +126,39 @@ func (r *Reader) Update(cfg *config.Config) error {
 	return nil
 }
 
+// totals counts one directory's index rows, for progress across batches.
+func (r *Reader) totals(ctx context.Context, code string) (store.Totals, int64, bool) {
+	if r.open() != nil {
+		return store.Totals{}, 0, false
+	}
+	r.mu.RLock()
+	if r.closed {
+		r.mu.RUnlock()
+		return store.Totals{}, 0, false
+	}
+	r.active.Add(1)
+	st := r.st
+	r.mu.RUnlock()
+	defer r.active.Done()
+	cols, err := st.Collections(ctx)
+	if err != nil {
+		return store.Totals{}, 0, false
+	}
+	for _, col := range cols {
+		if col.Code != code {
+			continue
+		}
+		t, err := st.Totals(ctx, col.ID)
+		if err != nil {
+			return store.Totals{}, 0, false
+		}
+		probe, _, err := st.CountPending(ctx, col.ID)
+		return t, probe, err == nil
+	}
+	// Not scanned yet: nothing indexed.
+	return store.Totals{}, 0, true
+}
+
 func (r *Reader) task(ctx context.Context, pid int) (store.Task, bool) {
 	if r.open() != nil {
 		return store.Task{}, false

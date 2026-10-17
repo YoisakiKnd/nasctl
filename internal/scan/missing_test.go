@@ -239,3 +239,34 @@ func TestAVanishedFileIsMarkedMissingOnACompleteWalk(t *testing.T) {
 		t.Errorf("Media = %d, want 2: a missing row must be flagged, never deleted", tt.Media)
 	}
 }
+
+// Files already in the index do not count against the limit, so running the
+// same limited scan again works through the library instead of stopping at
+// its first files every time.
+func TestRepeatedLimitedScansCoverTheWholeCollection(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < 12; i++ {
+		writeFile(t, filepath.Join(root, "IMG_"+string(rune('a'+i))+".jpg"), "not really a jpeg")
+	}
+	r, st, colID, _ := newTestRunner(t, root)
+	r.Cfg.Collections[0].EnabledKinds = []string{"image"}
+	ctx := context.Background()
+	var inserted int64
+	for run := 1; run <= 3; run++ {
+		res, err := r.Run(ctx, Options{CollectionCode: "test", Limit: 5, MaxRuntime: time.Minute})
+		if err != nil {
+			t.Fatal(err)
+		}
+		inserted += res.Inserted
+		if want := run < 3; res.More != want {
+			t.Fatalf("run %d: More=%v, want %v\n%s", run, res.More, want, res.HumanReport())
+		}
+	}
+	if inserted != 12 {
+		t.Fatalf("three runs of 5 indexed %d of 12 files", inserted)
+	}
+	totals, err := st.Totals(ctx, colID)
+	if err != nil || totals.Media != 12 {
+		t.Fatal(totals, err)
+	}
+}

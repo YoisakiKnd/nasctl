@@ -427,3 +427,43 @@ func TestPrivateDirectoryIsReadOnlyThroughThePrivateScope(t *testing.T) {
 		t.Fatal("private original", string(data))
 	}
 }
+
+func TestScanRunsBatchesUntilTheDirectoryIsDone(t *testing.T) {
+	old := batchPause
+	batchPause = 0
+	t.Cleanup(func() { batchPause = old })
+	dir := t.TempDir()
+	counter := filepath.Join(dir, "runs")
+	c, _, _ := controlRig(t, `n=$(/usr/bin/cat "`+counter+`" 2>/dev/null || echo 0)
+n=$((n+1))
+echo "$n" > "`+counter+`"
+echo "batch $n"
+if [ "$n" -lt 3 ]; then echo 'nasctl-batch: more'; fi
+`)
+	if err := c.Configure(context.Background(), album.Directory{Code: "photos", Name: "Photos", Root: "data", Path: "Photos", Enabled: true, AllowSharedVolume: true}); err != nil {
+		t.Fatal(err)
+	}
+	var reports int
+	result, err := c.Run(context.Background(), album.Work{Operation: "album.scan", Collection: "photos", Limit: 500, MaxRuntime: "1m"}, func(album.WorkProgress) { reports++ })
+	if err != nil || !result.Completed || !strings.Contains(result.Detail, "整个目录已处理完") {
+		t.Fatal(result, err)
+	}
+	runs, _ := os.ReadFile(counter)
+	if strings.TrimSpace(string(runs)) != "3" || reports == 0 {
+		t.Fatalf("worker ran %q times with %d progress reports", runs, reports)
+	}
+}
+
+func TestBatchesStopAtTheRuntimeBudgetWithoutFailing(t *testing.T) {
+	old := batchPause
+	batchPause = 0
+	t.Cleanup(func() { batchPause = old })
+	c, _, _ := controlRig(t, "/usr/bin/sleep 0.3\necho 'nasctl-batch: more'\n")
+	if err := c.Configure(context.Background(), album.Directory{Code: "photos", Name: "Photos", Root: "data", Path: "Photos", Enabled: true, AllowSharedVolume: true}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := c.Run(context.Background(), album.Work{Operation: "album.scan", Collection: "photos", Limit: 500, MaxRuntime: "1s"}, nil)
+	if err != nil || result.Completed || result.StopReason != "max_runtime" {
+		t.Fatal(result, err)
+	}
+}

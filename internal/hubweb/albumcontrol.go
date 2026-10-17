@@ -114,7 +114,7 @@ func (s *Server) handleAlbumTask(w http.ResponseWriter, r *http.Request) {
 	input.Operation = "album." + r.PathValue("operation")
 	duration, err := album.ValidateWork(input)
 	if err != nil {
-		writeError(w, 400, "bad_request", "请选择集合、1–10000 项限额和 1 秒至 2 小时的运行时限")
+		writeError(w, 400, "bad_request", "请选择目录、每批 1–10000 项和 1 秒至 12 小时的运行时限")
 		return
 	}
 	args := operations.NewArgs()

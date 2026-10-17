@@ -30,6 +30,7 @@
 
   const adminPages = $derived(auth?.authenticated ? allowedAdminPages(auth) : []);
   const inAdmin = $derived(current === 'admin' || current.startsWith('admin/'));
+  const inSettings = $derived(inAdmin || current === 'me');
   const readOnly = $derived(!snapshot || snapshot.read_only || auth?.principal === 'ai' || auth?.read_only_user);
   const canConfigure = $derived(auth?.can_manage_device !== false);
   const role = $derived(roleOf(auth));
@@ -120,36 +121,41 @@
   <Login available={auth.login_available} accounts={auth.accounts_enabled} setup={auth.setup_required} tokenAvailable={auth.token_login_available} onlogin={checkAuth}/>
 {:else}
 <a class="skip-link" href="#content">跳至主要内容</a>
-<div class="shell" class:admin-shell={inAdmin} class:user-shell={!inAdmin} class:fill={pageInfo(current)?.fill}>
-  {#if inAdmin}
-    <aside class="admin-sidebar" class:open={drawer} aria-label="管理后台导航">
-      <div class="sidebar-brand"><span class="brand-mark"><Icon name="disk" size={18}/></span><strong>nasctl</strong><span class="sidebar-badge">管理后台</span></div>
-      <nav class="sidebar-nav">
-        {#each groups as {group, pages: items}}
-          {#if group}<p class="sidebar-group">{group}</p>{/if}
-          {#each items as page (page.id)}<a class="nav-link" class:active={current === page.id} aria-current={current === page.id ? 'page' : undefined} href={'#' + page.id}><Icon name={page.icon} size={18}/><span>{page.label}</span></a>{/each}
-        {/each}
-      </nav>
-      <a class="sidebar-exit" href="#home"><Icon name="back" size={17}/>返回我的空间</a>
-    </aside>
-    {#if drawer}<button class="drawer-scrim" aria-label="关闭导航" onclick={() => drawer = false}></button>{/if}
-    <header class="admin-topbar">
-      <button class="icon-button drawer-toggle" aria-label="打开管理导航" aria-expanded={drawer} onclick={() => drawer = !drawer}><Icon name="menu" size={20}/></button>
-      <p class="topbar-title"><a href={'#' + adminPages[0]?.id}>管理后台</a><Icon name="chevron" size={14}/><strong>{pageInfo(current)?.label}</strong></p>
-      <span class="system-status" title={snapshot?.mode?.reason || ''}><span class="status-dot" class:offline={!healthy}></span>{snapshot ? modeLabels[snapshot.mode?.mode] || '状态未知' : '正在连接'}</span>
+<!-- One persistent header for every page, Nextcloud style: apps across the
+     top, each app's own navigation on the left of a rounded content area.
+     The admin pages and the account page form the "设置" app. -->
+<div class="shell" class:settings-shell={inSettings} class:fill={pageInfo(current)?.fill || inSettings}>
+  <header class="app-header">
+    {#if inSettings}<button class="icon-button drawer-toggle" aria-label="打开设置导航" aria-expanded={drawer} onclick={() => drawer = !drawer}><Icon name="menu" size={20}/></button>{/if}
+    <a class="brand" href="#home" aria-label="nasctl 首页"><span class="brand-mark"><Icon name="disk" size={18}/></span><strong>nasctl</strong></a>
+    <nav class="primary-nav" aria-label="主导航">{#each userPages.filter((page) => !page.mobileOnly) as page (page.id)}<a class="nav-link" class:active={current === page.id} aria-current={current === page.id ? 'page' : undefined} href={'#' + page.id}><Icon name={page.icon} size={18}/><span>{page.label}</span></a>{/each}</nav>
+    <div class="header-actions">
+      {#if adminPages.length}<a class="admin-entry" class:active={inAdmin} href={'#' + adminPages[0].id} title="管理设置" aria-label="管理设置"><Icon name="settings" size={19}/><span>管理</span></a>{/if}
       {@render account()}
-    </header>
-  {:else}
-    <header class="app-header">
-      <a class="brand" href="#home" aria-label="nasctl 首页"><span class="brand-mark"><Icon name="disk" size={18}/></span><strong>nasctl</strong></a>
-      <nav class="primary-nav" aria-label="主导航">{#each userPages.filter((page) => !page.mobileOnly) as page (page.id)}<a class="nav-link" class:active={current === page.id} aria-current={current === page.id ? 'page' : undefined} href={'#' + page.id}><Icon name={page.icon} size={17}/><span>{page.label}</span></a>{/each}</nav>
-      <div class="header-actions">
-        {#if adminPages.length}<a class="admin-entry" href={'#' + adminPages[0].id}><Icon name="settings" size={16}/><span>管理后台</span></a>{/if}
-        {@render account()}
-      </div>
-    </header>
-  {/if}
-  <main id="content" class="shell-main" tabindex="-1">{@render pages(visited)}</main>
-  {#if !inAdmin}<nav class="tab-bar" aria-label="快捷导航">{#each userPages as page (page.id)}<a class:active={current === page.id} aria-current={current === page.id ? 'page' : undefined} href={'#' + page.id}><Icon name={page.icon} size={22}/><span>{page.label}</span></a>{/each}</nav>{/if}
+    </div>
+  </header>
+  <div class="app-container" class:with-navigation={inSettings}>
+    {#if inSettings}
+      <aside class="app-navigation settings-navigation" class:admin-sidebar={adminPages.length > 0} class:open={drawer} aria-label="设置导航">
+        <p class="sidebar-group">个人</p>
+        <a class="nav-link" class:active={current === 'me'} aria-current={current === 'me' ? 'page' : undefined} href="#me"><Icon name="user" size={18}/><span>账号与外观</span></a>
+        {#if adminPages.length}
+          <nav class="sidebar-nav" aria-label="管理设置">
+            {#each groups as {group, pages: items}}
+              <p class="sidebar-group">{group || '管理'}</p>
+              {#each items as page (page.id)}<a class="nav-link" class:active={current === page.id} aria-current={current === page.id ? 'page' : undefined} href={'#' + page.id}><Icon name={page.icon} size={18}/><span>{page.label}</span></a>{/each}
+            {/each}
+          </nav>
+        {/if}
+        <div class="navigation-foot">
+          {#if inAdmin}<span class="system-status" title={snapshot?.mode?.reason || ''}><span class="status-dot" class:offline={!healthy}></span>{snapshot ? modeLabels[snapshot.mode?.mode] || '状态未知' : '正在连接'}</span>{/if}
+          <a class="sidebar-exit" href="#home"><Icon name="back" size={17}/>返回首页</a>
+        </div>
+      </aside>
+      {#if drawer}<button class="drawer-scrim" aria-label="关闭导航" onclick={() => drawer = false}></button>{/if}
+    {/if}
+    <main id="content" class="shell-main" tabindex="-1">{@render pages(visited)}</main>
+  </div>
+  <nav class="tab-bar" aria-label="快捷导航">{#each userPages as page (page.id)}<a class:active={current === page.id || (page.id === 'me' && inSettings)} aria-current={current === page.id ? 'page' : undefined} href={'#' + page.id}><Icon name={page.icon} size={22}/><span>{page.label}</span></a>{/each}</nav>
 </div>
 {/if}

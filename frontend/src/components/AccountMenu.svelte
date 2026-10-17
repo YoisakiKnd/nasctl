@@ -5,16 +5,21 @@
   // page, the admin area, theme and sign-out. Phones also have the "我的" tab.
   let { displayName = '', roleLabel = '', theme = 'system', adminHref = '', canLogout = false, pending = false, onthemechange, onlogout } = $props();
   const themes = [{id:'system', label:'跟随系统'}, {id:'light', label:'浅色'}, {id:'dark', label:'深色'}];
-  const go = (hash) => { window.location.hash = hash; };
+  let open = $state(false);
+  // Close first and navigate on the next frame: a menu destroyed while open
+  // would leave the page unclickable.
+  const go = (hash) => { open = false; requestAnimationFrame(() => { window.location.hash = hash; }); };
 </script>
-<DropdownMenu.Root>
+<DropdownMenu.Root bind:open>
   <DropdownMenu.Trigger class="avatar" aria-label={'我的账号：' + displayName} title={displayName}>{(displayName || 'N').slice(0,1).toUpperCase()}</DropdownMenu.Trigger>
   <DropdownMenu.Portal>
-    <DropdownMenu.Content class="menu" align="end" sideOffset={8}>
+    <!-- No body scroll lock: a menu does not need one, and its pointer-events
+         lock could outlive the menu and leave the page unclickable. -->
+    <DropdownMenu.Content class="menu" align="end" sideOffset={8} preventScroll={false}>
       <div class="menu-header"><strong>{displayName}</strong><small>{roleLabel}</small></div>
       <DropdownMenu.Separator class="menu-separator"/>
       <DropdownMenu.Item class="menu-item" onSelect={() => go('me')}><Icon name="user" size={16}/>账号与外观</DropdownMenu.Item>
-      {#if adminHref}<DropdownMenu.Item class="menu-item" onSelect={() => go(adminHref)}><Icon name="settings" size={16}/>管理后台</DropdownMenu.Item>{/if}
+      {#if adminHref}<DropdownMenu.Item class="menu-item" onSelect={() => go(adminHref)}><Icon name="settings" size={16}/>管理设置</DropdownMenu.Item>{/if}
       <DropdownMenu.Separator class="menu-separator"/>
       <DropdownMenu.RadioGroup value={theme} onValueChange={(value) => onthemechange?.(value)}>
         <DropdownMenu.GroupHeading class="menu-heading">主题</DropdownMenu.GroupHeading>
