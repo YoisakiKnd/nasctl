@@ -1249,7 +1249,6 @@ details.settings-card .key-values {grid-template-columns:130px 1fr; margin:0;}
 .app-container {position:relative; display:flex; min-height:0; margin:0 8px 8px; border-radius:var(--radius); overflow:hidden; box-shadow:0 0 0 1px rgb(0 0 0/.04),0 4px 24px rgb(0 0 0/.12);}
 .shell-main {flex:1; min-width:0; min-height:0; overflow:auto; outline:none; position:relative; background:var(--surface);}
 .shell.fill .shell-main {overflow:hidden;}
-.settings-shell .shell-main {overflow:auto;}
 .page[hidden] {display:none;}
 .page>.content {max-width:1180px; margin:0 auto; padding:30px 36px 56px; min-width:0; container-type:inline-size; container-name:application;}
 .page-fill {height:100%;}

@@ -124,7 +124,7 @@
 <!-- One persistent header for every page, Nextcloud style: apps across the
      top, each app's own navigation on the left of a rounded content area.
      The admin pages and the account page form the "设置" app. -->
-<div class="shell" class:settings-shell={inSettings} class:fill={pageInfo(current)?.fill || inSettings}>
+<div class="shell" class:settings-shell={inSettings} class:fill={pageInfo(current)?.fill}>
   <header class="app-header">
     {#if inSettings}<button class="icon-button drawer-toggle" aria-label="打开设置导航" aria-expanded={drawer} onclick={() => drawer = !drawer}><Icon name="menu" size={20}/></button>{/if}
     <a class="brand" href="#home" aria-label="nasctl 首页"><span class="brand-mark"><Icon name="disk" size={18}/></span><strong>nasctl</strong></a>
