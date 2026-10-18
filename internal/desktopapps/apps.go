@@ -154,3 +154,67 @@ func (s *Store) Save(ctx context.Context, revision string, apps []App) (View, er
 	}
 	return s.read()
 }
+
+// MaxWallpaperBytes bounds an uploaded wallpaper. The browser scales a large
+// photo down before uploading; the server never decodes it.
+const MaxWallpaperBytes = 12 << 20
+
+var ErrWallpaper = errors.New("apps: the wallpaper must be a JPEG, PNG or WebP image of at most 12 MiB")
+
+func (s *Store) wallpaperPath() string {
+	return filepath.Join(filepath.Dir(s.path), "desktop-wallpaper")
+}
+
+// wallpaperType names an image by its signature, without decoding it.
+func wallpaperType(head []byte) string {
+	switch {
+	case len(head) >= 3 && head[0] == 0xFF && head[1] == 0xD8 && head[2] == 0xFF:
+		return "image/jpeg"
+	case len(head) >= 8 && string(head[:8]) == "\x89PNG\r\n\x1a\n":
+		return "image/png"
+	case len(head) >= 12 && string(head[:4]) == "RIFF" && string(head[8:12]) == "WEBP":
+		return "image/webp"
+	}
+	return ""
+}
+
+// SetWallpaper stores the desktop wallpaper for every member of the NAS.
+func (s *Store) SetWallpaper(data []byte) error {
+	if len(data) == 0 || len(data) > MaxWallpaperBytes || wallpaperType(data) == "" {
+		return ErrWallpaper
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return fsutil.AtomicWriteFile(s.wallpaperPath(), data, 0o600)
+}
+
+// Wallpaper opens the stored wallpaper; os.ErrNotExist when there is none.
+func (s *Store) Wallpaper() (*os.File, os.FileInfo, string, error) {
+	f, err := os.OpenFile(s.wallpaperPath(), os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() > MaxWallpaperBytes {
+		f.Close()
+		return nil, nil, "", ErrWallpaper
+	}
+	head := make([]byte, 16)
+	n, _ := io.ReadFull(f, head)
+	kind := wallpaperType(head[:n])
+	if _, err := f.Seek(0, io.SeekStart); err != nil || kind == "" {
+		f.Close()
+		return nil, nil, "", ErrWallpaper
+	}
+	return f, info, kind, nil
+}
+
+// RemoveWallpaper returns the desktop to the built-in wallpapers.
+func (s *Store) RemoveWallpaper() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := os.Remove(s.wallpaperPath()); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}

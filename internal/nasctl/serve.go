@@ -268,7 +268,9 @@ func cmdServe(ctx context.Context, env Env, cfg *config.Config, g globals, args 
 	srv.Anime = animeEngine
 	srv.Accounts = users
 	srv.Settings = settingslocal.New(cfg)
-	srv.Apps = desktopapps.New(cfg.Paths.StateDir)
+	desktop := desktopapps.New(cfg.Paths.StateDir)
+	srv.Apps = desktop
+	srv.Wallpaper = desktop
 	if err := srv.EnableRememberedSessions(cfg.Paths.StateDir); err != nil {
 		// Kept sessions are a convenience: an unreadable file signs members out
 		// rather than stopping the console.

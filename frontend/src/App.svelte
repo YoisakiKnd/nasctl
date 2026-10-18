@@ -6,6 +6,7 @@
   import { userPages, allowedAdminPages, resolve, pageInfo, roleOf } from './lib/routes.js';
   import { loadTheme, applyTheme } from './lib/theme.js';
   import { vault, startVault, lockVault } from './lib/vault.svelte.js';
+  import { wallpaperCSS, checkCustomWallpaper } from './lib/desktop.svelte.js';
   import Icon from './components/Icon.svelte';
   import Page from './components/Page.svelte';
   import Login from './components/Login.svelte';
@@ -49,6 +50,7 @@
   }
   // Only device managers can unlock the vault, so only they track it.
   $effect(() => {if (auth?.authenticated && canConfigure && auth.principal !== 'ai') return startVault();});
+  $effect(() => {if (auth?.authenticated && auth.principal !== 'ai') checkCustomWallpaper();});
   function go(id) { if (window.location.hash !== '#' + id) window.location.hash = id; else route(); }
   function searchFiles(request) { fileSearch = {...request, id:++searchNumber}; go('files'); }
   function setTheme(value) { theme = value; applyTheme(value); }
@@ -124,7 +126,7 @@
 <!-- One persistent header for every page, Nextcloud style: apps across the
      top, each app's own navigation on the left of a rounded content area.
      The admin pages and the account page form the "设置" app. -->
-<div class="shell" class:settings-shell={inSettings} class:fill={pageInfo(current)?.fill}>
+<div class="shell" class:settings-shell={inSettings} class:desktop-shell={current === 'home'} class:fill={pageInfo(current)?.fill} style:--wallpaper={wallpaperCSS()}>
   <header class="app-header">
     {#if inSettings}<button class="icon-button drawer-toggle" aria-label="打开设置导航" aria-expanded={drawer} onclick={() => drawer = !drawer}><Icon name="menu" size={20}/></button>{/if}
     <a class="brand" href="#home" aria-label="nasctl 首页"><span class="brand-mark"><Icon name="disk" size={18}/></span><strong>nasctl</strong></a>

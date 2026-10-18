@@ -43,6 +43,7 @@ import (
 	"github.com/YoisakiKnd/nasctl/internal/photovault"
 	"github.com/YoisakiKnd/nasctl/internal/settings"
 	"github.com/YoisakiKnd/nasctl/internal/suzu"
+	"github.com/YoisakiKnd/nasctl/internal/sysinfo"
 )
 
 // Config wires the web layer.
@@ -117,6 +118,8 @@ type Server struct {
 	vaultAuth    browserAuth
 	CloudBackups cloudbackup.Control
 	Apps         desktopapps.Control
+	Wallpaper    Wallpapers
+	System       *sysinfo.Sampler
 	Backups      backups.Control
 	Settings     settings.Control
 	Accounts     accounts.Control
@@ -180,7 +183,7 @@ func New(cfg Config, fm *files.Manager, jm *jobs.Manager, sc *suzu.Client, log *
 	if cfg.PreviewMaxBytes <= 0 {
 		cfg.PreviewMaxBytes = d.PreviewMaxBytes
 	}
-	return &Server{
+	return &Server{System: sysinfo.New(),
 		Cfg:          cfg,
 		Files:        fm,
 		Jobs:         jm,
@@ -219,6 +222,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/apps", s.handleApps)
 	mux.HandleFunc("PUT /api/v1/apps", s.handleApps)
 	mux.HandleFunc("GET /api/v1/overview", s.handleOverview)
+	mux.HandleFunc("GET /api/v1/system/status", s.handleSystemStatus)
+	mux.HandleFunc("GET /api/v1/desktop/wallpaper", s.handleWallpaper)
+	mux.HandleFunc("PUT /api/v1/desktop/wallpaper", s.handleWallpaper)
+	mux.HandleFunc("DELETE /api/v1/desktop/wallpaper", s.handleWallpaper)
 	mux.HandleFunc("GET /api/v1/ops", s.handleOps)
 	mux.HandleFunc("GET /api/v1/audit", s.handleAudit)
 	mux.HandleFunc("GET /api/v1/modes", s.handleModes)

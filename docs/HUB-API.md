@@ -485,6 +485,18 @@ There is no operation, and no route, that:
 A request to an unknown `/api/` path returns **`404` with a JSON body** - not the
 HTML shell, so a client cannot mistake a missing endpoint for a working one.
 
+## Desktop
+
+- `GET /api/v1/system/status` — CPU percent and cores, memory and swap, load,
+  uptime, the hottest thermal zone (`temperature_c`, null when absent) and
+  per-interface byte counters and rates (virtual interfaces are left out).
+  Measured on request from /proc and /sys; rates are deltas against the
+  previous request, or a 250 ms measurement when there is none from the last
+  15 seconds. Any member may read it; helper tokens may not.
+- `GET /api/v1/desktop/wallpaper` — the shared custom wallpaper, 404 when none.
+  `PUT` (raw JPEG, PNG or WebP body, at most 12 MiB, signature checked, never
+  decoded) and `DELETE` need a device manager and `X-Nasctl-Confirm: 1`.
+
 ## Native album browser
 
 The authenticated `/api/v1/album` reader reads the in-process local index. It offers status (with
