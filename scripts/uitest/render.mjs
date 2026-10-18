@@ -45,7 +45,7 @@ try {
   const js = await fetch(base+'/app.js',{headers}); check(js.ok,'compiled Svelte bundle responds');
   w.eval(await js.text());
   await wait(() => text('#overview-stamp').includes('更新于'),'overview resolves');
-  check(d.querySelectorAll('.sidebar-nav .nav-link').length === 8,'all eight admin pages are listed for a device manager');
+  check(d.querySelectorAll('.sidebar-nav .nav-link').length === 9,'all nine admin pages are listed for a device manager');
   check(!text('.system-status').includes('正在连接'),'global status resolves');
   await route('files');
   await wait(() => d.querySelectorAll('.file-name').length > 0,'file listing resolves');

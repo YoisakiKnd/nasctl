@@ -25,7 +25,7 @@ try{
   check(resolve('#media',viewer)==='anime'&&resolve('#overview',viewer)==='home'&&resolve('#admin/jobs',viewer)==='home','viewers stay on user pages');
   check(resolve('#jobs',operator)==='admin/jobs'&&resolve('#admin/album',operator)==='admin/album'&&resolve('#settings',operator)==='home'&&resolve('#admin/users',operator)==='home','operators reach task pages but not device settings');
   check(resolve('#settings',admin)==='admin/system'&&resolve('#backup',admin)==='admin/backup'&&resolve('#nonsense',admin)==='home','old desktop hashes map to their new pages');
-  check(allowedAdminPages(viewer).length===0&&allowedAdminPages(operator).length===4&&allowedAdminPages(admin).length===8,'admin navigation follows the role');
+  check(allowedAdminPages(viewer).length===0&&allowedAdminPages(operator).length===4&&allowedAdminPages(admin).length===9,'admin navigation follows the role');
 
   w.eval(await(await request('/app.js')).text());await wait(()=>active()==='home','home');
   check(d.querySelector('.app-header .primary-nav')&&!d.querySelector('.admin-sidebar'),'user pages use the top navigation');

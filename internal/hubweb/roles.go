@@ -23,7 +23,7 @@ func roleRouteAllowed(p domain.Principal, r *http.Request) bool {
 	if p.Role == domain.RoleViewer && (path == "/api/v1/anime/settings" || strings.HasPrefix(path, "/api/v1/anime/metadata/") || strings.HasPrefix(path, "/api/v1/anime/sources/") || path == "/api/v1/anime/history/export" || strings.HasPrefix(path, "/api/v1/anime/subscriptions/") && strings.HasSuffix(path, "/history")) {
 		return false
 	}
-	for _, prefix := range []string{"/api/v1/users", "/api/v1/settings", "/api/v1/approvals", "/api/v1/audit", "/api/v1/backup", "/api/v1/ops"} {
+	for _, prefix := range []string{"/api/v1/users", "/api/v1/settings", "/api/v1/approvals", "/api/v1/audit", "/api/v1/backup", "/api/v1/ops", "/api/v1/storage"} {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return false
 		}

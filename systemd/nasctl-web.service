@@ -58,6 +58,9 @@ CacheDirectory=albumctl
 CacheDirectoryMode=0750
 ProtectSystem=strict
 ReadWritePaths=/var/lib/albumctl /var/cache/albumctl
+# Disks mounted by the storage helper appear here. The console writes to them
+# only through storage locations an administrator marked writable.
+ReadWritePaths=-/media/nasctl
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes

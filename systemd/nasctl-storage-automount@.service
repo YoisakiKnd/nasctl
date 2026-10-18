@@ -1,0 +1,15 @@
+[Unit]
+Description=nasctl automatic mount of /dev/%I
+Documentation=file:/usr/local/share/doc/albumctl/STORAGE.md
+After=local-fs.target
+
+# Started by udev (99-nasctl-automount.rules) when a USB filesystem appears.
+# It does nothing unless automatic mounting is switched on in the console.
+# Like the storage helper, it must stay in the host mount namespace.
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/nasctl storage-helper --config /etc/albumctl/config.toml automount /dev/%I
+SyslogIdentifier=nasctl-storage
+NoNewPrivileges=yes
+MemoryMax=128M
+TimeoutStartSec=90

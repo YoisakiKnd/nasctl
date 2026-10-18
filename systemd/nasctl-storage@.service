@@ -1,0 +1,24 @@
+[Unit]
+Description=nasctl storage helper (one request)
+Documentation=file:/usr/local/share/doc/albumctl/STORAGE.md
+CollectMode=inactive-or-failed
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nasctl storage-helper --config /etc/albumctl/config.toml
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+SyslogIdentifier=nasctl-storage
+
+# This helper mounts filesystems for the whole machine, so it must run in the
+# host's mount namespace. Do not add PrivateTmp, ProtectSystem, ProtectHome,
+# ReadOnlyPaths or any other option that gives the service its own namespace:
+# mounts made inside it would be invisible to everything else.
+# Every request is validated by the helper itself; see STORAGE.md.
+NoNewPrivileges=yes
+LockPersonality=yes
+RestrictRealtime=yes
+MemoryMax=128M
+# Formatting a large disk is the longest operation.
+RuntimeMaxSec=30min

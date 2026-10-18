@@ -15,6 +15,7 @@ export const adminPages = [
   {id:'admin/jobs', label:'任务中心', icon:'jobs', group:'', roles:['admin','operator']},
   {id:'admin/anime', label:'追番管理', icon:'anime', group:'内容', roles:['admin','operator']},
   {id:'admin/album', label:'相册管理', icon:'album', group:'内容', roles:['admin','operator']},
+  {id:'admin/storage', label:'存储与共享', icon:'disk', group:'数据', roles:['admin']},
   {id:'admin/backup', label:'备份', icon:'backup', group:'数据', roles:['admin']},
   {id:'admin/users', label:'用户与权限', icon:'users', group:'系统', roles:['admin']},
   {id:'admin/system', label:'系统设置', icon:'settings', group:'系统', roles:['admin']},
@@ -23,7 +24,7 @@ export const adminPages = [
 
 const aliases = {
   '': 'home', overview: 'admin', media: 'anime', jobs: 'admin/jobs',
-  settings: 'admin/system', backup: 'admin/backup',
+  settings: 'admin/system', backup: 'admin/backup', storage: 'admin/storage',
 };
 
 export function roleOf(auth) {

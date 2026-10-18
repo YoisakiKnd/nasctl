@@ -370,6 +370,9 @@ jobs:
       - name: User and admin shell, keep-alive pages, role routing and session expiry
         run: node scripts/uitest/shell.mjs http://127.0.0.1:18090 nasctl-ci-fixture-operator
 
+      - name: Storage page, missing helper guidance and replayed helper answers
+        run: node scripts/uitest/storage.mjs http://127.0.0.1:18090 nasctl-ci-fixture-operator
+
       - name: Native album without a second HTTP service and real worker pause/resume
         run: |
           go run ./scripts/uitest/seed-album --fixture-only --writable --root /tmp/nasctl-ci-native-album --hub-port 18099

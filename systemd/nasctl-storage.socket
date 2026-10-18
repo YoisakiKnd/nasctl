@@ -1,0 +1,19 @@
+[Unit]
+Description=nasctl storage helper socket
+Documentation=file:/usr/local/share/doc/albumctl/STORAGE.md
+
+# The console runs unprivileged. Disks, mounts and Samba shares need root, so
+# each connection here starts one nasctl-storage@.service instance as root; it
+# answers a single request and exits. Only members of the nasctl group (the
+# console's service user) may connect.
+[Socket]
+ListenStream=/run/nasctl/storage.sock
+SocketUser=root
+SocketGroup=nasctl
+SocketMode=0660
+DirectoryMode=0755
+Accept=yes
+MaxConnections=4
+
+[Install]
+WantedBy=sockets.target

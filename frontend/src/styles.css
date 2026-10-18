@@ -1502,3 +1502,41 @@ dialog {border-radius:var(--radius-lg);}
 .wallpaper-swatch {display:block; width:100%; aspect-ratio:16/10; border-radius:8px;}
 .wallpaper-actions {display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:4px 10px 8px;}
 .me-section>.field-help {margin:0 10px 10px;}
+
+/* ---- storage & sharing ------------------------------------------------------ */
+.storage-tabs {margin-bottom:18px;}
+.storage-automount {margin-bottom:14px; border:1px solid var(--border); border-radius:var(--radius);}
+.storage-hint {align-items:flex-start;}
+.storage-hint code,.storage-setup code,.share-list code {font-size:12px;}
+.command-block {margin:10px 0 14px; padding:14px 16px; border-radius:var(--radius-sm); background:var(--surface-soft); border:1px solid var(--border); font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; overflow-wrap:anywhere;}
+.drive-grid {display:grid; grid-template-columns:repeat(auto-fill,minmax(340px,1fr)); gap:16px;}
+.drive-card {display:flex; flex-direction:column; gap:14px; padding:18px 20px; min-width:0;}
+.drive-card>header {display:flex; align-items:center; gap:12px; min-width:0; flex-wrap:wrap;}
+.drive-card>header>div {flex:1; min-width:150px; display:grid; gap:2px;}
+.drive-card>header strong {font-size:14px; overflow-wrap:anywhere;}
+.drive-card>header small {font-size:12px; overflow-wrap:anywhere;}
+.drive-icon {display:grid; place-items:center; width:46px; height:46px; flex-shrink:0; border-radius:12px; background:var(--accent-soft); color:var(--accent);}
+.drive-icon.usb {background:color-mix(in srgb,#f59e0b 16%,transparent); color:#d97706;}
+.drive-card.system .drive-icon {background:var(--surface-hover); color:var(--muted);}
+.drive-health {display:flex; flex-wrap:wrap; gap:8px; margin:0;}
+.drive-health>div {padding:6px 10px; border-radius:8px; background:var(--surface-soft); display:grid; gap:1px;}
+.drive-health dt {font-size:11px; color:var(--muted);}
+.drive-health dd {margin:0; font-size:13px; font-weight:600;}
+.drive-note {margin:0;}
+.partition-list {list-style:none; margin:0; padding:0; display:grid; gap:2px; border-top:1px solid var(--border);}
+.partition-list>li {display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid var(--border); font-size:12px;}
+.partition-main {flex:1; min-width:0; display:grid; gap:3px;}
+.partition-main strong {font-size:13px; overflow-wrap:anywhere;}
+.partition-main small {overflow-wrap:anywhere;}
+.partition-bar {background:var(--surface-hover); max-width:260px;}
+.drive-card>footer {display:flex; justify-content:space-between; gap:12px; margin-top:auto;}
+.share-list {list-style:none; margin:0; padding:0; display:grid;}
+.share-list>li {display:flex; align-items:center; gap:12px; padding:12px 0; border-top:1px solid var(--border); font-size:12px; flex-wrap:wrap;}
+.share-list>li>div {flex:1; min-width:180px; display:grid; gap:2px;}
+.share-list>li>div small {overflow-wrap:anywhere;}
+.button.primary.danger {background:var(--error); border-color:var(--error);}
+.button.primary.danger:disabled {opacity:.5;}
+@media (max-width:720px) {
+  .drive-grid {grid-template-columns:1fr;}
+  .drive-card {padding:16px;}
+}

@@ -1,0 +1,3 @@
+# nasctl: hand new USB filesystems to the storage helper, which mounts them
+# under /media/nasctl when automatic mounting is on in the console.
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{ID_FS_USAGE}=="filesystem", TAG+="systemd", ENV{SYSTEMD_WANTS}+="nasctl-storage-automount@%k.service"

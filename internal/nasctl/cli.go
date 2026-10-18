@@ -90,6 +90,12 @@ func Main(argv []string, env Env) int {
 		ctx, stop := signalContext()
 		defer stop()
 		return cmdInit(ctx, env, globals, rest)
+	case "storage-helper":
+		// Runs as root from nasctl-storage@.service: no state lease, no
+		// database, only the configuration's storage locations.
+		ctx, stop := signalContext()
+		defer stop()
+		return cmdStorageHelper(ctx, env, globals, rest)
 	}
 
 	cfg, err := loadCommandConfig(globals, cmd, rest)
@@ -348,6 +354,7 @@ Commands:
   doctor              Read-only check of configuration, storage and resources
   serve               Run the web console (foreground)
   init                Create a new private NAS config; never overwrite
+  storage-helper      Root storage helper (started by nasctl-storage.socket)
   users list|setup-code|create|set|password|remove|recover
                       Local account administration; passwords via stdin
   settings reset      Offline repair of saved settings; --confirm required

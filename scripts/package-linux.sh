@@ -28,7 +28,7 @@ nasctl_stage=$(mktemp -d "$nasctl_out/.nasctl-package-XXXXXXXX")
 trap 'rm -rf -- "$nasctl_stage"' EXIT
 nasctl_name="nasctl-linux-$nasctl_arch"
 nasctl_package="$nasctl_stage/$nasctl_name"
-mkdir -p "$nasctl_package"/{configs,systemd,docs}
+mkdir -p "$nasctl_package"/{configs,systemd,docs,udev,tmpfiles}
 nasctl_flags="-s -w -X github.com/YoisakiKnd/nasctl/internal/buildinfo.Version=$nasctl_version -X github.com/YoisakiKnd/nasctl/internal/buildinfo.Commit=$nasctl_commit -X github.com/YoisakiKnd/nasctl/internal/buildinfo.BuildTime=$nasctl_time -X github.com/YoisakiKnd/nasctl/internal/buildinfo.Target=$nasctl_target"
 for nasctl_program in nasctl; do
   CGO_ENABLED=0 GOWORK=off GOOS=linux GOARCH="$nasctl_goarch" GOARM=7 \
@@ -46,10 +46,13 @@ for nasctl_program in nasctl; do
   fi
 done
 cp configs/nasctl.example.toml "$nasctl_package/configs/"
-cp systemd/nasctl-web.service systemd/nasctl-album-thumbs.service systemd/nasctl-album-thumbs.timer "$nasctl_package/systemd/"
+cp systemd/nasctl-web.service systemd/nasctl-album-thumbs.service systemd/nasctl-album-thumbs.timer \
+  systemd/nasctl-storage.socket systemd/nasctl-storage@.service systemd/nasctl-storage-automount@.service "$nasctl_package/systemd/"
+cp udev/99-nasctl-automount.rules "$nasctl_package/udev/"
+cp tmpfiles/nasctl.conf "$nasctl_package/tmpfiles/"
 cp LICENSE "$nasctl_package/"
 cp -R third_party/licenses "$nasctl_package/licenses"
-for nasctl_doc in DEPLOYMENT UPGRADE FRONTEND AUTH ALBUM ANIME FILES MEDIA BACKUPS STATE-BACKUPS SETTINGS PHOTO-VAULT WEBDAV-BACKUP DESKTOP-APPS ONECLOUD-MEDIA; do
+for nasctl_doc in DEPLOYMENT UPGRADE FRONTEND AUTH ALBUM ANIME FILES MEDIA BACKUPS STATE-BACKUPS SETTINGS PHOTO-VAULT WEBDAV-BACKUP DESKTOP-APPS ONECLOUD-MEDIA STORAGE; do
   cp "docs/$nasctl_doc.md" "$nasctl_package/docs/"
 done
 {

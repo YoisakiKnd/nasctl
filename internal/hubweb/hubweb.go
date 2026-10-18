@@ -120,6 +120,7 @@ type Server struct {
 	Apps         desktopapps.Control
 	Wallpaper    Wallpapers
 	System       *sysinfo.Sampler
+	Storage      StorageHelper
 	Backups      backups.Control
 	Settings     settings.Control
 	Accounts     accounts.Control
@@ -226,6 +227,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/desktop/wallpaper", s.handleWallpaper)
 	mux.HandleFunc("PUT /api/v1/desktop/wallpaper", s.handleWallpaper)
 	mux.HandleFunc("DELETE /api/v1/desktop/wallpaper", s.handleWallpaper)
+	mux.HandleFunc("GET /api/v1/storage", s.handleStorage)
+	mux.HandleFunc("GET /api/v1/storage/smart", s.handleStorageSmart)
+	mux.HandleFunc("POST /api/v1/storage/{action}", s.handleStorageAction)
 	mux.HandleFunc("GET /api/v1/ops", s.handleOps)
 	mux.HandleFunc("GET /api/v1/audit", s.handleAudit)
 	mux.HandleFunc("GET /api/v1/modes", s.handleModes)

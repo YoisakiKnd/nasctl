@@ -23,6 +23,7 @@
   import Users from './views/admin/Users.svelte';
   import System from './views/admin/System.svelte';
   import Logs from './views/admin/Logs.svelte';
+  import Storage from './views/admin/Storage.svelte';
 
   let theme = $state('system'), snapshot = $state(null), error = $state(''), loading = $state(false);
   let auth = $state(null), authError = $state(''), authPending = $state(false);
@@ -103,6 +104,7 @@
       {:else if id === 'admin/jobs'}<Jobs/>
       {:else if id === 'admin/anime'}<Anime {readOnly} admin/>
       {:else if id === 'admin/album'}<AlbumAdmin {readOnly} {canConfigure}/>
+      {:else if id === 'admin/storage'}<Storage {readOnly}/>
       {:else if id === 'admin/backup'}<Backup {readOnly}/>
       {:else if id === 'admin/users'}<Users {auth} onaccountschange={checkAuth}/>
       {:else if id === 'admin/system'}<System onchange={refresh}/>

@@ -497,6 +497,44 @@ HTML shell, so a client cannot mistake a missing endpoint for a working one.
   `PUT` (raw JPEG, PNG or WebP body, at most 12 MiB, signature checked, never
   decoded) and `DELETE` need a device manager and `X-Nasctl-Confirm: 1`.
 
+## Storage
+
+Disks, mounts, Samba shares and network storage, through the root storage
+helper (see STORAGE.md). Every route needs a device manager; other roles get
+403. Mutations also need `X-Nasctl-Confirm: 1` and are audited as
+`storage.<operation>` (passwords never reach the audit log).
+
+- `GET /api/v1/storage` — `{helper, disks, status, error?}`. `helper` is false
+  when the socket is not installed; `disks` then is empty and `status` null.
+  `disks[]`: `name, path, model, serial, vendor, transport, size, removable,
+  read_only, system, partitions[]` with `name, path, size, fstype, label, uuid,
+  mountpoints, avail, used, system, managed` (managed = under /media/nasctl).
+  `status`: `tools` (which optional programs exist), `automount`, `shares`,
+  `net_mounts` (without passwords, with `mounted`), `share_user`, `persisted`
+  (mount points in the managed fstab block).
+- `GET /api/v1/storage/smart?device=/dev/sda` — `available, passed,
+  temperature_c, power_on_hours, reallocated_sectors, pending_sectors,
+  percent_used, model, detail`; fields are null when the disk does not report
+  them.
+- `POST /api/v1/storage/{action}` with one JSON object (unknown fields are
+  refused; the URL, not the body, chooses the operation):
+
+| action | body | notes |
+| --- | --- | --- |
+| `mount` | `device, name?, persist?` | name defaults to the label |
+| `unmount` | `name, forget?` | forget also removes the fstab entry |
+| `format` | `device, label, confirm` | whole non-system disk; confirm = serial, or device name without one; may take minutes |
+| `automount` | `enabled` | USB automount switch |
+| `shares` | `shares[]` of `name, path, writable, guest` | replaces the whole list |
+| `share-password` | `password` | 8–128 characters, for the `nasctl-share` account |
+| `net-add` | `net: {name, kind (smb/nfs), server, share, username?, password?, read_only, persist}` | |
+| `net-remove` | `name` | |
+
+Answers: 200 `{ok:true}`; 400 `storage_refused` with the helper's reason (and
+`detail` with tool output when a command failed); 503
+`storage_helper_missing`; 504 `storage_timeout` (the helper keeps going; reload
+to see the result).
+
 ## Native album browser
 
 The authenticated `/api/v1/album` reader reads the in-process local index. It offers status (with

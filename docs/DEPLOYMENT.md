@@ -76,8 +76,9 @@ RequiresMountsFor=/mnt/data
 ReadWritePaths=/mnt/data/files /mnt/data/downloads/anime /mnt/data/library/anime
 ```
 
-路径应对应已经配置的真实挂载；先核对 `findmnt`／fstab。应用不会挂载设备，也不会在
-缺失卷上创建空媒体根。应用中的可写确认与 systemd 文件系统权限需同时满足。修改
+路径应对应已经配置的真实挂载；先核对 `findmnt`／fstab。控制台本身不会挂载设备，也不会在
+缺失卷上创建空媒体根。需要在网页里挂载磁盘、格式化、开 Samba 共享或连接网络存储时，
+另外启用可选的 root 存储助手，见 [STORAGE.md](STORAGE.md)。应用中的可写确认与 systemd 文件系统权限需同时满足。修改
 统一设置、监听或 drop-in 后，等当前任务停止再重启；无需重启第二个相册 HTTP 服务。
 同一状态目录的第二个 nasctl 会在打开数据库前拒绝，普通本机 CLI 仍可使用。
 

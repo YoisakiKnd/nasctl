@@ -39,7 +39,9 @@ Web 查询层的导入图仍不包含扫描器、解码器或子进程实现，�
 原生追番已实现 RSS → 下载 → 归档的单集流程和网页入口，默认关闭自动下载与定时刷新。
 以 AutoBangumi 为功能参考，不依赖已删除的 IWantWatchAnime 源码，不包含 Telegram 通知。
 配置、API 和功能边界见 [`docs/ANIME.md`](docs/ANIME.md)。文件管理参考 CasaOS 的常用操作。
-Svelte 前端分为日常使用的用户页面（首页、文件、相册、追番）和管理后台（任务、订阅、相册处理、备份、用户与系统设置），手机使用底部标签栏，见 [`docs/FRONTEND.md`](docs/FRONTEND.md)。
+磁盘、挂载、USB 自动挂载、Samba 共享和网络存储由可选的按需 root 存储助手完成，控制台本身不提权，见
+[`docs/STORAGE.md`](docs/STORAGE.md)。
+Svelte 前端分为日常使用的用户页面（首页、文件、相册、追番）和管理后台（任务、订阅、相册处理、存储与共享、备份、用户与系统设置），手机使用底部标签栏，见 [`docs/FRONTEND.md`](docs/FRONTEND.md)。
 相册默认本地读取，可配置照片目录、限量扫描／缩略图、暂停恢复，也兼容已有远程服务配置，见
 [`docs/ALBUM.md`](docs/ALBUM.md)。
 
