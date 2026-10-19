@@ -43,6 +43,7 @@ type Partition struct {
 	FSType      string   `json:"fstype"`
 	Label       string   `json:"label"`
 	UUID        string   `json:"uuid"`
+	PartUUID    string   `json:"partuuid,omitempty"`
 	Mountpoints []string `json:"mountpoints"`
 	Avail       int64    `json:"avail"`
 	Used        int64    `json:"used"`
@@ -55,8 +56,8 @@ type Partition struct {
 // in util-linux 2.37, so older systems are asked for LsblkColumnsOld instead.
 // Running lsblk is the helper's job: the web layer must not reach os/exec.
 const (
-	LsblkColumns    = "NAME,KNAME,PATH,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINTS,MODEL,SERIAL,VENDOR,TRAN,RM,RO,PKNAME,FSAVAIL,FSUSED"
-	LsblkColumnsOld = "NAME,KNAME,PATH,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINT,MODEL,SERIAL,VENDOR,TRAN,RM,RO,PKNAME,FSAVAIL,FSUSED"
+	LsblkColumns    = "NAME,KNAME,PATH,TYPE,SIZE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS,MODEL,SERIAL,VENDOR,TRAN,RM,RO,PKNAME,FSAVAIL,FSUSED"
+	LsblkColumnsOld = "NAME,KNAME,PATH,TYPE,SIZE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINT,MODEL,SERIAL,VENDOR,TRAN,RM,RO,PKNAME,FSAVAIL,FSUSED"
 )
 
 // flex accepts the JSON shapes different lsblk versions print: numbers,
@@ -93,6 +94,7 @@ type node struct {
 	FSType      flex    `json:"fstype"`
 	Label       flex    `json:"label"`
 	UUID        flex    `json:"uuid"`
+	PartUUID    flex    `json:"partuuid"`
 	Mountpoint  flex    `json:"mountpoint"`
 	Mountpoints []*flex `json:"mountpoints"`
 	Model       flex    `json:"model"`
@@ -164,7 +166,7 @@ func ParseLsblk(data []byte) ([]Disk, error) {
 		walk = func(nodes []node) {
 			for _, p := range nodes {
 				part := Partition{Name: p.KName.str(), Path: devPath(p), Size: p.Size.int(), FSType: p.FSType.str(), Label: p.Label.str(),
-					UUID: p.UUID.str(), Mountpoints: p.mounts(), Avail: p.FSAvail.int(), Used: p.FSUsed.int()}
+					UUID: p.UUID.str(), PartUUID: p.PartUUID.str(), Mountpoints: p.mounts(), Avail: p.FSAvail.int(), Used: p.FSUsed.int()}
 				if part.Name == "" {
 					part.Name = p.Name.str()
 				}
@@ -201,6 +203,35 @@ func ParseLsblk(data []byte) ([]Disk, error) {
 		return disks[i].Name < disks[j].Name
 	})
 	return disks, nil
+}
+
+// MarkSwapFiles marks the partition holding each active swap file as part of
+// the system, since lsblk shows only swap partitions. swaps is the content
+// of /proc/swaps; a file lies on the partition with the longest mount point
+// that contains it.
+func MarkSwapFiles(disks []Disk, swaps []byte) {
+	for _, line := range strings.Split(string(swaps), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 2 || f[1] != "file" {
+			continue
+		}
+		file := strings.ReplaceAll(f[0], `\040`, " ")
+		di, pi, best := -1, -1, -1
+		for i := range disks {
+			for j, p := range disks[i].Partitions {
+				for _, m := range p.Mountpoints {
+					if (m == "/" || file == m || strings.HasPrefix(file, m+"/")) && len(m) > best {
+						di, pi, best = i, j, len(m)
+					}
+				}
+			}
+		}
+		if di >= 0 {
+			disks[di].Partitions[pi].System = true
+			disks[di].System = true
+		}
+	}
+	sort.SliceStable(disks, func(i, j int) bool { return disks[i].System && !disks[j].System })
 }
 
 func devPath(n node) string {

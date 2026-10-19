@@ -27,6 +27,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/YoisakiKnd/nasctl/internal/storage"
@@ -42,6 +43,7 @@ type Helper struct {
 	StateFile    string
 	CredDir      string
 	MountInfo    string
+	Filesystems  string // /proc/filesystems: the kernel's filesystem drivers
 	ServiceUser  string
 	ShareUser    string
 	// Bases lists the folders shares may be made inside, besides MountBase.
@@ -61,6 +63,7 @@ func New(bases func() []string) *Helper {
 		StateFile:    "/etc/nasctl/storage.json",
 		CredDir:      "/etc/nasctl/credentials",
 		MountInfo:    "/proc/self/mountinfo",
+		Filesystems:  "/proc/filesystems",
 		ServiceUser:  "nasctl",
 		ShareUser:    "nasctl-share",
 		Bases:        bases,
@@ -82,11 +85,24 @@ func inventory(ctx context.Context) ([]storage.Disk, error) {
 	if err != nil {
 		return nil, errors.New("storage: lsblk is not available")
 	}
-	return storage.ParseLsblk(out)
+	disks, err := storage.ParseLsblk(out)
+	if err != nil {
+		return nil, err
+	}
+	if swaps, err := os.ReadFile("/proc/swaps"); err == nil {
+		storage.MarkSwapFiles(disks, swaps)
+	}
+	return disks, nil
 }
 
 func run(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	// mount starts mount.nfs or mount.cifs, which keep the output pipe open;
+	// on a deadline the whole group is killed and Wait stops waiting for the
+	// pipe, so an unreachable server cannot hold a request past it.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = 5 * time.Second
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
@@ -297,6 +313,7 @@ var (
 	hostPattern  = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]{0,252}[A-Za-z0-9])?$|^\[?[0-9A-Fa-f:]{2,39}\]?$`)
 	remotePath   = regexp.MustCompile(`^[^\x00-\x1f"'\\,]{1,255}$`)
 	userPattern  = regexp.MustCompile(`^[^\x00-\x1f\s,=]{1,64}$`)
+	ntfs3Driver  = regexp.MustCompile(`(?m)\sntfs3$`)
 )
 
 // allowedFS maps a filesystem to how it is mounted.
@@ -344,12 +361,28 @@ func (h *Helper) mountOptions(fs string) (string, error) {
 // or ntfs-3g when only that is installed.
 func (h *Helper) fsType(fs string) string {
 	if fs == "ntfs" {
+		if b, err := os.ReadFile(h.Filesystems); err == nil && ntfs3Driver.Match(b) {
+			return "ntfs3"
+		}
 		if _, err := h.LookPath("mount.ntfs-3g"); err == nil {
 			return "ntfs-3g"
 		}
 		return "ntfs3"
 	}
 	return fs
+}
+
+// mountCommand mounts dev at mp. A FUSE filesystem (ntfs-3g) keeps a daemon
+// running for as long as it is mounted; started from the helper, systemd
+// would stop that daemon with the helper's own unit when the request ends.
+// systemd-mount gives it a mount unit of its own.
+func (h *Helper) mountCommand(ctx context.Context, fstype, opts, dev, mp string) ([]byte, error) {
+	if fstype == "ntfs-3g" {
+		if _, err := h.LookPath("systemd-mount"); err == nil {
+			return h.Run(ctx, nil, "systemd-mount", "--collect", "-t", fstype, "-o", opts, dev, mp)
+		}
+	}
+	return h.Run(ctx, nil, "mount", "-t", fstype, "-o", opts, dev, mp)
 }
 
 func (h *Helper) mount(ctx context.Context, device, name string, persist bool) error {
@@ -377,7 +410,7 @@ func (h *Helper) mount(ctx context.Context, device, name string, persist bool) e
 	if err := h.prepareMountpoint(mp); err != nil {
 		return err
 	}
-	if out, err := h.Run(ctx, nil, "mount", "-t", h.fsType(part.FSType), "-o", opts, part.Path, mp); err != nil {
+	if out, err := h.mountCommand(ctx, h.fsType(part.FSType), opts, part.Path, mp); err != nil {
 		_ = os.Remove(mp)
 		return failed("挂载失败", out, err)
 	}
@@ -388,6 +421,15 @@ func (h *Helper) mount(ctx context.Context, device, name string, persist bool) e
 		pass := "0"
 		if strings.HasPrefix(part.FSType, "ext") {
 			pass = "2"
+		}
+		// The partition may still be remembered under a name it was mounted
+		// with before; two lines would mount it twice at boot.
+		for _, e := range h.fstabEntries() {
+			if f := strings.Fields(e.line); e.mountpoint != mp && f[0] == "UUID="+part.UUID {
+				if err := h.setFstab(e.mountpoint, ""); err != nil {
+					return err
+				}
+			}
 		}
 		return h.setFstab(mp, fmt.Sprintf("UUID=%s %s %s %s,nofail,x-systemd.device-timeout=10s 0 %s", part.UUID, escapeFstab(mp), h.fsType(part.FSType), opts, pass))
 	}
@@ -471,6 +513,12 @@ func (h *Helper) automount(ctx context.Context, device string) error {
 	if disk.System || part.System || len(part.Mountpoints) > 0 || (!disk.Removable && disk.Transport != "usb") || allowedFS[part.FSType] == "" {
 		return nil
 	}
+	// A USB data disk the machine mounts from its own fstab lines may appear
+	// before that mount happens (nofail mounts don't hold up boot), or again
+	// after a reconnect; it belongs where the fstab puts it.
+	if h.inHostFstab(part) {
+		return nil
+	}
 	base := defaultName(part)
 	name := base
 	for i := 2; h.mounts()[filepath.Join(h.MountBase, name)] && i < 10; i++ {
@@ -496,7 +544,7 @@ func (h *Helper) automount(ctx context.Context, device string) error {
 		}
 		return nil
 	}
-	out, err := h.Run(ctx, nil, "mount", "-t", h.fsType(part.FSType), "-o", opts, part.Path, mp)
+	out, err := h.mountCommand(ctx, h.fsType(part.FSType), opts, part.Path, mp)
 	if err != nil {
 		return failed("自动挂载失败", out, err)
 	}
@@ -596,7 +644,16 @@ func (h *Helper) smart(ctx context.Context, device string) (storage.SMART, error
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	out, _ := h.Run(ctx, nil, "smartctl", "-j", "-H", "-A", "-i", device)
-	return ParseSmart(out), nil
+	s := ParseSmart(out)
+	// Many USB enclosures (Realtek, some JMicron) pass ATA commands through
+	// SAT but are missing from smartctl's bridge list.
+	if !s.Available && strings.Contains(s.Detail, "Unknown USB bridge") {
+		out, _ = h.Run(ctx, nil, "smartctl", "-j", "-d", "sat", "-H", "-A", "-i", device)
+		if sat := ParseSmart(out); sat.Available {
+			return sat, nil
+		}
+	}
+	return s, nil
 }
 
 // ParseSmart reads the parts of `smartctl -j` worth showing.
@@ -616,7 +673,9 @@ func ParseSmart(out []byte) storage.SMART {
 			Table []struct {
 				ID  int `json:"id"`
 				Raw struct {
-					Value int `json:"value"`
+					// Vendors pack several counters into one raw value
+					// (Seagate's power-on hours and temperature), past 32 bits.
+					Value int64 `json:"value"`
 				} `json:"raw"`
 			} `json:"table"`
 		} `json:"ata_smart_attributes"`
@@ -649,7 +708,7 @@ func ParseSmart(out []byte) storage.SMART {
 	}
 	if doc.ATA != nil {
 		for _, a := range doc.ATA.Table {
-			v := a.Raw.Value
+			v := int(a.Raw.Value)
 			switch a.ID {
 			case 5:
 				s.Reallocated = &v
@@ -750,10 +809,51 @@ func (h *Helper) setFstab(mp, line string) error {
 	if text != "" {
 		text += "\n"
 	}
-	if backup := h.Fstab + ".nasctl-backup"; !exists(backup) && len(b) > 0 {
-		_ = writeFile(backup, b, 0o644)
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(h.Fstab); err == nil {
+		mode = info.Mode().Perm()
 	}
-	return writeFile(h.Fstab, []byte(text), 0o644)
+	if backup := h.Fstab + ".nasctl-backup"; !exists(backup) && len(b) > 0 {
+		_ = writeFile(backup, b, mode)
+	}
+	return writeFile(h.Fstab, []byte(text), mode)
+}
+
+// inHostFstab reports whether a line outside the nasctl block names the
+// partition, by UUID, PARTUUID, LABEL or device path.
+func (h *Helper) inHostFstab(p storage.Partition) bool {
+	b, err := os.ReadFile(h.Fstab)
+	if err != nil {
+		return false
+	}
+	names := map[string]bool{p.Path: true}
+	if p.UUID != "" {
+		names["UUID="+p.UUID] = true
+		names["/dev/disk/by-uuid/"+p.UUID] = true
+	}
+	if p.PartUUID != "" {
+		names["PARTUUID="+p.PartUUID] = true
+		names["/dev/disk/by-partuuid/"+p.PartUUID] = true
+	}
+	if p.Label != "" {
+		names["LABEL="+escapeFstab(p.Label)] = true
+		names["/dev/disk/by-label/"+escapeFstab(p.Label)] = true
+	}
+	inside := false
+	for _, line := range strings.Split(string(b), "\n") {
+		switch {
+		case line == fstabBegin:
+			inside = true
+		case line == fstabEnd:
+			inside = false
+		case !inside:
+			f := strings.Fields(line)
+			if len(f) > 0 && !strings.HasPrefix(f[0], "#") && names[strings.Trim(f[0], `"`)] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func exists(p string) bool { _, err := os.Stat(p); return err == nil }
@@ -802,8 +902,21 @@ func (h *Helper) setShares(ctx context.Context, shares []storage.Share) error {
 		return refuse("最多 32 个共享")
 	}
 	seen := map[string]bool{}
+	// Samba merges sections that share a name, so a nasctl share named like
+	// one in the host's own smb.conf would rewrite that share.
+	host := map[string]bool{}
+	if b, err := os.ReadFile(h.SambaConf); err == nil {
+		for _, line := range strings.Split(string(b), "\n") {
+			if l := strings.TrimSpace(line); strings.HasPrefix(l, "[") && strings.HasSuffix(l, "]") {
+				host[strings.ToLower(strings.TrimSpace(l[1:len(l)-1]))] = true
+			}
+		}
+	}
 	for _, s := range shares {
 		key := strings.ToLower(s.Name)
+		if host[key] {
+			return refuse("NAS 的 Samba 配置里已有同名共享，请换一个名称：" + s.Name)
+		}
 		if !sharePattern.MatchString(s.Name) || seen[key] || map[string]bool{"global": true, "homes": true, "printers": true, "print$": true, "ipc$": true}[key] {
 			return refuse("共享名称无效或重复：" + s.Name)
 		}
@@ -959,9 +1072,16 @@ func (h *Helper) addNet(ctx context.Context, n *storage.NetMount) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if out, err := h.Run(ctx, nil, "mount", "-t", fstype, "-o", opts, source, mp); err != nil {
+	now := opts
+	if fstype == "nfs" {
+		now += ",retry=0" // mount.nfs otherwise retries for two minutes
+	}
+	if out, err := h.Run(ctx, nil, "mount", "-t", fstype, "-o", now, source, mp); err != nil {
 		_ = os.Remove(mp)
 		_ = os.Remove(cred)
+		if ctx.Err() != nil {
+			return failed("连接网络存储超时：30 秒内没有连上服务器，请检查地址和网络", out, errors.New("mount: no answer within 30s"))
+		}
 		return failed("连接网络存储失败：请检查地址、共享名称和账号密码", out, err)
 	}
 	if n.Persist {

@@ -48,3 +48,20 @@ func TestParseLsblkAcrossVersions(t *testing.T) {
 		t.Fatalf("whole-disk filesystem %+v", usb)
 	}
 }
+
+func TestMarkSwapFiles(t *testing.T) {
+	disks := []Disk{
+		{Name: "sda", System: true, Partitions: []Partition{{Name: "sda2", Mountpoints: []string{"/"}, System: true}}},
+		{Name: "mmcblk1", Partitions: []Partition{{Name: "mmcblk1p1", Mountpoints: []string{"/mnt/emmc"}}}},
+		{Name: "sdb", Partitions: []Partition{{Name: "sdb1", Mountpoints: []string{"/mnt/emmc2"}}}},
+	}
+	MarkSwapFiles(disks, []byte("Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n"+
+		"/dev/zram0                              partition\t502364\t\t21248\t\t5\n"+
+		"/mnt/emmc/swapfile                      file\t\t1048572\t\t0\t\t-2\n"))
+	if disks[0].Name != "sda" || disks[1].Name != "mmcblk1" || !disks[1].System || !disks[1].Partitions[0].System {
+		t.Fatalf("swap file disk not marked: %+v", disks)
+	}
+	if disks[2].System {
+		t.Fatalf("a mount point sharing the prefix was marked: %+v", disks[2])
+	}
+}

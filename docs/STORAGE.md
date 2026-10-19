@@ -22,7 +22,10 @@ nasctl 控制台以普通用户 `nasctl` 运行，并在 systemd 沙箱里（`Pr
   - 只挂载到 `/media/nasctl/名称`，名称只能是字母、数字、`.`、`_`、`-`，最多 32 个字符；
     同名目录里已有文件时拒绝。
   - 只挂载 ext2/3/4、XFS、Btrfs、F2FS、FAT32、exFAT、NTFS；一律带 `nosuid,nodev`。
-    FAT32、exFAT、NTFS 挂载时文件属于 nasctl 用户。
+    FAT32、exFAT、NTFS 挂载时文件属于 nasctl 用户。NTFS 优先用内核的 ntfs3 驱动；
+    内核没有 ntfs3 时才用 ntfs-3g，并通过 `systemd-mount` 挂载，让它的后台进程不随
+    助手退出。
+  - 存放正在使用的交换文件的分区也算系统盘。
   - 格式化只针对整块非系统盘，必须先卸载所有分区，并输入磁盘**序列号**（没有序列号时
     输入设备名）确认。结果是一个 GPT 分区、ext4 文件系统，自动挂载并设为开机挂载。
   - 共享文件夹必须在已配置的存储位置或 `/media/nasctl` 里（符号链接解析后再判断），
@@ -58,7 +61,7 @@ systemctl restart nasctl-web
 
 | 软件包 | 用途 |
 | --- | --- |
-| `smartmontools` | 硬盘健康（SMART）。很多 USB 硬盘盒不转发 SMART，会显示“不支持健康检查” |
+| `smartmontools` | 硬盘健康（SMART）。smartctl 不认识的 USB 硬盘盒会再用 SAT 方式试一次；仍不转发 SMART 的会显示“不支持健康检查” |
 | `samba` | 局域网共享 |
 | `cifs-utils` | 连接 SMB 网络存储 |
 | `nfs-common` | 连接 NFS 网络存储 |
@@ -87,7 +90,8 @@ UUID=… /media/nasctl/backup ext4 noatime,nosuid,nodev,nofail,x-systemd.device-
 ```
 
 - 按 UUID 挂载，带 `nofail` 和 10 秒设备等待：磁盘不在时**不会卡住开机**。
-- 区块以外的行原样保留。第一次修改前，原文件备份为 `/etc/fstab.nasctl-backup`。
+- 同一个分区换名称再勾选开机挂载时，旧名称的行会被替换，不会开机挂两次。
+- 区块以外的行原样保留，文件权限不变。第一次修改前，原文件备份为 `/etc/fstab.nasctl-backup`。
 - 网络存储的行带 `_netdev,nofail` 和 30 秒挂载超时。
 
 ## USB 自动挂载
@@ -96,6 +100,10 @@ UUID=… /media/nasctl/backup ext4 noatime,nosuid,nodev,nofail,x-systemd.device-
 启动 `nasctl-storage-automount@设备.service`，助手用 `systemd-mount` 把它挂到
 `/media/nasctl/卷标`（重名时加 `-2`、`-3`）。拔出设备时 systemd 自动卸载。
 
+`/etc/fstab` 里（nasctl 区块以外）已经按 UUID、PARTUUID、卷标或设备名登记的分区不会被
+自动挂载：开机时带 `nofail` 的挂载不会等 USB 硬盘，数据盘可能先于它出现，重新插拔时也一样，
+它应当留给 fstab 挂到原来的位置。
+
 自动挂载不会写 `/etc/fstab`；想要开机挂载的 USB 硬盘，在页面上卸载后再手动挂载并勾选
 “开机自动挂载”。拔出前最好先在页面上点“卸载”，避免正在写入的文件损坏。
 
@@ -103,6 +111,8 @@ UUID=… /media/nasctl/backup ext4 noatime,nosuid,nodev,nofail,x-systemd.device-
 
 - 共享配置写在 `/etc/samba/nasctl-shares.conf`，助手只在 `/etc/samba/smb.conf` 末尾加一行
   `include = /etc/samba/nasctl-shares.conf`，不改动其他内容。
+- 共享名不能和 smb.conf 里已有的共享同名（不分大小写）：Samba 会把同名段落合并，等于改写
+  原来的共享。
 - 每次保存都先用 `testparm` 校验，不通过就恢复原来的共享；通过后让 smbd 重新加载配置，
   已连接的电脑不会断开。
 - 需要密码的共享用账号 `nasctl-share` 登录。第一次设置共享密码时助手会创建这个系统用户
@@ -124,6 +134,8 @@ UUID=… /media/nasctl/backup ext4 noatime,nosuid,nodev,nofail,x-systemd.device-
   传给 mount.cifs，不出现在进程列表、fstab 或网页里。
 - 文件归 nasctl 服务用户（`uid=`/`gid=`），NFS 使用 `soft,timeo=150,retrans=3`，远端离线时
   不会让程序永久卡住。
+- 添加时最多等 30 秒：服务器不可达或拒绝连接会在这之内报错（NFS 这次挂载不重试，开机挂载
+  照常重试）。
 - “断开并移除”会卸载、删除凭据和开机挂载行。
 
 ## 文件位置

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/YoisakiKnd/nasctl/internal/storage"
 )
@@ -357,6 +358,14 @@ func TestParseSmart(t *testing.T) {
 	if *s.Passed || *s.PercentUsed != 7 {
 		t.Fatalf("nvme = %+v", s)
 	}
+	// Seagate packs counters into 48-bit raw values; on 32-bit ARM these
+	// must not make the whole report unreadable.
+	seagate := `{"smart_status":{"passed":true},"temperature":{"current":34},"power_on_time":{"hours":1757},
+"ata_smart_attributes":{"table":[{"id":5,"raw":{"value":0}},{"id":9,"raw":{"value":15195787566778077}},{"id":194,"raw":{"value":90194313249}},{"id":197,"raw":{"value":0}}]}}`
+	s = ParseSmart([]byte(seagate))
+	if !s.Available || *s.TemperatureC != 34 || *s.PowerOnHours != 1757 || *s.Reallocated != 0 {
+		t.Fatalf("seagate = %+v", s)
+	}
 	usb := `{"smartctl":{"messages":[{"string":"/dev/sdb: Unknown USB bridge [0x1234:0x5678]","severity":"error"}]}}`
 	s = ParseSmart([]byte(usb))
 	if s.Available || !strings.Contains(s.Detail, "USB bridge") {
@@ -394,5 +403,138 @@ func TestClientOverSocket(t *testing.T) {
 	}
 	if err := (storage.Client{Socket: filepath.Join(f.dir, "none")}).Call(context.Background(), storage.Request{Op: "status"}, nil); !errors.Is(err, storage.ErrHelperMissing) {
 		t.Fatal(err)
+	}
+}
+
+func TestAutomountLeavesHostFstabDisksAlone(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if err := f.update(func(s *state) error { s.Automount = true; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{
+		"UUID=1111-2222  /srv/data  ext4  defaults,nofail  0  2",
+		"LABEL=Backup\\040Disk /srv/backup ext4 defaults 0 2",
+		"/dev/sdb1 /srv/data ext4 defaults 0 2",
+	} {
+		if err := os.WriteFile(f.Fstab, []byte("# UUID=nothing\n"+line+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		f.calls = nil
+		if err := f.automount(ctx, "/dev/sdb1"); err != nil || len(f.calls) != 0 {
+			t.Fatalf("%q: automounted a host fstab disk: %v %v", line, err, f.calls)
+		}
+	}
+	// A line inside the nasctl block is nasctl's own and does not count.
+	if err := os.WriteFile(f.Fstab, []byte(fstabBegin+"\nUUID=1111-2222 /media/nasctl/x ext4 nofail 0 2\n"+fstabEnd+"\n# UUID=1111-2222 /old ext4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.automount(ctx, "/dev/sdb1"); err != nil || len(f.calls) != 1 {
+		t.Fatalf("calls = %v, err = %v", f.calls, err)
+	}
+}
+
+func TestSmartRetriesUnknownUSBBridgeThroughSAT(t *testing.T) {
+	f := newFixture(t)
+	f.Run = func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
+		f.calls = append(f.calls, call{argv: append([]string{name}, args...)})
+		if strings.Contains(strings.Join(args, " "), "-d sat") {
+			return []byte(`{"smart_status":{"passed":true},"temperature":{"current":33}}`), nil
+		}
+		return []byte(`{"smartctl":{"messages":[{"string":"/dev/sdb: Unknown USB bridge [0x0bda:0x9201 (0xf200)]"}]}}`), errors.New("exit status 1")
+	}
+	s, err := f.smart(context.Background(), "/dev/sdb")
+	if err != nil || !s.Available || !*s.Passed || *s.TemperatureC != 33 || len(f.calls) != 2 {
+		t.Fatalf("smart = %+v, %v, calls %v", s, err, f.calls)
+	}
+}
+
+func TestPersistReplacesAnEarlierNameForThePartition(t *testing.T) {
+	f := newFixture(t)
+	original := "UUID=abc / ext4 defaults 0 1\n"
+	if err := os.WriteFile(f.Fstab, []byte(original), 0o664); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.mount(context.Background(), "/dev/sdb1", "first", true); err != nil {
+		t.Fatal(err)
+	}
+	// Unmounted without forgetting, then mounted at boot under a new name.
+	if err := f.mount(context.Background(), "/dev/sdb1", "second", true); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(f.Fstab)
+	if n := strings.Count(string(b), "UUID=1111-2222 "); n != 1 || !strings.Contains(string(b), filepath.Join(f.MountBase, "second")) {
+		t.Fatalf("fstab:\n%s", b)
+	}
+	if info, _ := os.Stat(f.Fstab); info.Mode().Perm() != 0o664 {
+		t.Fatalf("fstab mode = %v, want the original 0664", info.Mode().Perm())
+	}
+}
+
+func TestNTFSPrefersTheKernelDriverAndKeepsFUSEAlive(t *testing.T) {
+	f := newFixture(t)
+	f.Inventory = func(context.Context) ([]storage.Disk, error) {
+		return []storage.Disk{{Name: "sdc", Path: "/dev/sdc", Transport: "usb", Partitions: []storage.Partition{
+			{Name: "sdc1", Path: "/dev/sdc1", FSType: "ntfs", Label: "Win", UUID: "AAAA"}}}}, nil
+	}
+	f.Filesystems = filepath.Join(f.dir, "filesystems")
+	if err := os.WriteFile(f.Filesystems, []byte("nodev\tproc\n\text4\n\tntfs3\n\tfuseblk\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := f.mount(ctx, "/dev/sdc1", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(f.calls[0].argv[:3], " "); got != "mount -t ntfs3" {
+		t.Fatalf("with ntfs3 in the kernel: %v", f.calls)
+	}
+	// Only ntfs-3g: a FUSE daemon, which must not live in the helper's unit.
+	if err := os.WriteFile(f.Filesystems, []byte("\text4\n\tfuseblk\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.calls = nil
+	if err := f.mount(ctx, "/dev/sdc1", "win2", false); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(f.calls[0].argv[:4], " "); got != "systemd-mount --collect -t ntfs-3g" {
+		t.Fatalf("with only ntfs-3g: %v", f.calls)
+	}
+}
+
+func TestShareNamesDoNotTakeOverHostShares(t *testing.T) {
+	f := newFixture(t)
+	if err := os.WriteFile(f.SambaConf, []byte("[global]\n   workgroup = WORKGROUP\n\n  [Data]\n   path = /srv/data\n   valid users = ty0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := f.setShares(context.Background(), []storage.Share{{Name: "data", Path: f.Bases()[0], Guest: true}})
+	refusal(t, err, "已有同名共享")
+	if _, statErr := os.Stat(f.SambaInclude); !os.IsNotExist(statErr) {
+		t.Fatalf("include written despite the refusal: %v", statErr)
+	}
+}
+
+func TestRunStopsChildrenThatHoldTheOutput(t *testing.T) {
+	// Like mount handing over to mount.nfs: the child keeps stdout open.
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	if _, err := run(ctx, nil, "sh", "-c", "sleep 30 & sleep 30"); err == nil {
+		t.Fatal("no error after the deadline")
+	}
+	if d := time.Since(start); d > 4*time.Second {
+		t.Fatalf("run returned after %v", d)
+	}
+}
+
+func TestNFSMountsOnceButBootRetries(t *testing.T) {
+	f := newFixture(t)
+	if err := f.addNet(context.Background(), &storage.NetMount{Name: "nas", Kind: "nfs", Server: "10.0.0.2", Share: "export", Persist: true}); err != nil {
+		t.Fatal(err)
+	}
+	if argv := strings.Join(f.calls[0].argv, " "); !strings.Contains(argv, ",retry=0 ") {
+		t.Fatalf("mount = %s", argv)
+	}
+	if b, _ := os.ReadFile(f.Fstab); strings.Contains(string(b), "retry=0") || !strings.Contains(string(b), "10.0.0.2:/export") {
+		t.Fatalf("fstab:\n%s", b)
 	}
 }
