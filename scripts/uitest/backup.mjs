@@ -14,7 +14,7 @@ const click=(label,scope=d)=>{const b=button(label,scope);if(!b||b.disabled)thro
 const field=(label,value)=>{const f=d.querySelector('[aria-label="'+label+'"]');if(!f)throw Error('missing '+label);f.value=value;f.dispatchEvent(new w.Event('input',{bubbles:true}));f.dispatchEvent(new w.Event('change',{bubbles:true}));};
 const submit=()=>d.querySelector('dialog .backup-form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
 const calls=(suffix)=>requests.filter(r=>r.method==='POST'&&r.path==='/api/v1/backup/'+suffix).length;
-async function taskFinished(op){await wait(()=>d.querySelector('.backup-result')&&!d.querySelector('dialog')&&d.querySelector('.task-monitor strong')?.textContent==='backup.'+op,'task '+op);await wait(()=>button('执行备份')&&!button('执行备份').disabled,'task settled '+op);}
+async function taskFinished(op){await wait(()=>d.querySelector('.backup-result')&&!d.querySelector('dialog')&&d.querySelector('.task-monitor strong')?.dataset.op==='backup.'+op,'task '+op);await wait(()=>button('执行备份')&&!button('执行备份').disabled,'task settled '+op);}
 const content=async(root,path)=>{const r=await request('/api/v1/files/download?'+new URLSearchParams({root,path}));if(!r.ok)throw Error(await r.text());return r.text();};
 w.fetch=request;w.AbortController=AbortController;w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
 w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};

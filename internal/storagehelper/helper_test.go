@@ -455,6 +455,10 @@ func TestPersistReplacesAnEarlierNameForThePartition(t *testing.T) {
 	if err := os.WriteFile(f.Fstab, []byte(original), 0o664); err != nil {
 		t.Fatal(err)
 	}
+	// Set the mode explicitly: WriteFile's is masked by the umask.
+	if err := os.Chmod(f.Fstab, 0o664); err != nil {
+		t.Fatal(err)
+	}
 	if err := f.mount(context.Background(), "/dev/sdb1", "first", true); err != nil {
 		t.Fatal(err)
 	}

@@ -40,7 +40,7 @@
   });
 </script>
 <div class="task-monitor" role="status">
-  {#if job}<div class="button-group"><strong>{opLabel(job.op)}</strong><span class="badge">{jobLabels[job.state] || job.state}</span>{#if job.cancellable && !stopping}<button class="text-button" onclick={() => confirming = !confirming}>停止任务</button>{/if}</div>
+  {#if job}<div class="button-group"><strong data-op={job.op}>{opLabel(job.op)}</strong><span class="badge">{jobLabels[job.state] || job.state}</span>{#if job.cancellable && !stopping}<button class="text-button" onclick={() => confirming = !confirming}>停止任务</button>{/if}</div>
     {#if job.unit}<p class="field-help">已处理 {amount(job.progress)}{job.total > 0 ? ' / ' + amount(job.total) : ' · 总量待完成后确认'}</p>{#if job.total > 0}<progress max={job.total} value={job.progress} aria-label="任务进度"></progress>{/if}{/if}
     {#if detail}<p class="field-help task-detail">{detail}</p>{/if}
     {#if job.error}<ErrorNotice message={jobError(job.error)} inline/>{/if}

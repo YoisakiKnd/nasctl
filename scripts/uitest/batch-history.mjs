@@ -12,8 +12,8 @@ w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');
 try{
  w.eval(await(await request('/app.js')).text());await wait(()=>d.querySelector('[aria-label="任务状态"]'),'jobs view');
  const filter=d.querySelector('[aria-label="任务状态"]');filter.value='failed';filter.dispatchEvent(new w.Event('change',{bubbles:true}));
- await wait(()=>[...d.querySelectorAll('tbody tr')].some(row=>row.textContent.includes('files.batch')),'saved failed batch');
- const row=[...d.querySelectorAll('tbody tr')].find(row=>row.textContent.includes('files.batch'));row.querySelector('button').click();
+ await wait(()=>d.querySelector('tbody tr [data-op="files.batch"]'),'saved failed batch');
+ const row=d.querySelector('tbody tr [data-op="files.batch"]').closest('tr');row.querySelector('button').click();
  await wait(()=>d.querySelector('dialog .file-batch-result')?.textContent.includes('目标同名，未覆盖'),'human per-item results');
  if(!d.querySelector('dialog .file-batch-result').textContent.includes('完成 1 项 · 失败 1 项'))throw Error('partial outcome missing');
  console.log('Reopened task history shows durable per-item batch results after service restart.');

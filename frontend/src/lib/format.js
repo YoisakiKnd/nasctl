@@ -25,7 +25,7 @@ const opNames = {
   'files.upload': '上传文件', 'files.edit': '编辑文本', 'files.mkdir': '新建文件夹', 'files.rename': '移动或重命名',
   'files.copy': '复制', 'files.move': '移动', 'files.extract': '解压', 'files.batch': '批量整理', 'files.purge': '永久删除',
   'files.trash': '移入回收站', 'files.restore': '恢复文件',
-  'backup.run': '本地备份', 'backup.restore': '恢复本地备份', 'backup.delete': '删除备份', 'backup.cleanup': '清理备份',
+  'backup.run': '本地备份', 'backup.verify': '校验备份', 'backup.restore': '恢复本地备份', 'backup.delete': '删除备份', 'backup.cleanup': '清理备份',
   'backup.webdav.run': '上传备份', 'backup.webdav.restore': '恢复备份', 'backup.webdav.retry': '重试上传',
   'album.scan': '扫描相册', 'album.thumbs': '生成缩略图', 'album.vault.move': '移入保险箱',
   'anime.refresh': '刷新订阅', 'anime.sync': '同步下载', 'anime.metadata.refresh': '更新番剧信息',
