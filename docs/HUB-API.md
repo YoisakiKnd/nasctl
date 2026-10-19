@@ -493,9 +493,11 @@ HTML shell, so a client cannot mistake a missing endpoint for a working one.
   Measured on request from /proc and /sys; rates are deltas against the
   previous request, or a 250 ms measurement when there is none from the last
   15 seconds. Any member may read it; helper tokens may not.
-- `GET /api/v1/desktop/wallpaper` — the shared custom wallpaper, 404 when none.
-  `PUT` (raw JPEG, PNG or WebP body, at most 12 MiB, signature checked, never
-  decoded) and `DELETE` need a device manager and `X-Nasctl-Confirm: 1`.
+- `GET /api/v1/desktop/wallpaper` — the shared custom wallpaper, 404 when none;
+  with `?exists=1` it answers `{"custom": bool}` instead. `PUT` (raw JPEG, PNG
+  or WebP body, at most 12 MiB, signature checked, never decoded, streamed to
+  disk rather than held in memory) and `DELETE` need a device manager and
+  `X-Nasctl-Confirm: 1`.
 
 ## Storage
 

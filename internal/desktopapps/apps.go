@@ -178,14 +178,36 @@ func wallpaperType(head []byte) string {
 	return ""
 }
 
-// SetWallpaper stores the desktop wallpaper for every member of the NAS.
-func (s *Store) SetWallpaper(data []byte) error {
-	if len(data) == 0 || len(data) > MaxWallpaperBytes || wallpaperType(data) == "" {
-		return ErrWallpaper
-	}
+// SetWallpaper stores the desktop wallpaper for every member of the NAS. The
+// image streams to disk: it is checked by its signature and size as it is
+// written, never held in memory, and replaces the old one only when whole.
+func (s *Store) SetWallpaper(r io.Reader) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return fsutil.AtomicWriteFile(s.wallpaperPath(), data, 0o600)
+	return fsutil.AtomicWrite(s.wallpaperPath(), 0o600, func(w io.Writer) error {
+		head := make([]byte, 16)
+		n, err := io.ReadFull(r, head)
+		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+			if errors.Is(err, io.EOF) {
+				return ErrWallpaper
+			}
+			return err
+		}
+		if wallpaperType(head[:n]) == "" {
+			return ErrWallpaper
+		}
+		if _, err = w.Write(head[:n]); err != nil {
+			return err
+		}
+		rest, err := io.Copy(w, io.LimitReader(r, int64(MaxWallpaperBytes-n)+1))
+		if err != nil {
+			return err
+		}
+		if int64(n)+rest > MaxWallpaperBytes {
+			return ErrWallpaper
+		}
+		return nil
+	})
 }
 
 // Wallpaper opens the stored wallpaper; os.ErrNotExist when there is none.

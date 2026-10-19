@@ -14,7 +14,7 @@ import (
 
 // Wallpapers stores the desktop wallpaper shared by every member.
 type Wallpapers interface {
-	SetWallpaper([]byte) error
+	SetWallpaper(io.Reader) error
 	Wallpaper() (*os.File, os.FileInfo, string, error)
 	RemoveWallpaper() error
 }
@@ -45,6 +45,15 @@ func (s *Server) handleWallpaper(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == "GET" || r.Method == "HEAD" {
 		f, info, kind, err := s.Wallpaper.Wallpaper()
+		// The desktop asks whether there is one at all; "no" is an answer,
+		// not a failed request in the browser's console.
+		if r.URL.Query().Has("exists") {
+			if err == nil {
+				f.Close()
+			}
+			writeJSON(w, 200, map[string]bool{"custom": err == nil})
+			return
+		}
 		if errors.Is(err, os.ErrNotExist) {
 			writeError(w, 404, "not_found", "没有自定义壁纸")
 			return
@@ -81,13 +90,21 @@ func (s *Server) handleWallpaper(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]bool{"custom": false})
 		return
 	}
-	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, desktopapps.MaxWallpaperBytes+1))
-	if err != nil || len(data) > desktopapps.MaxWallpaperBytes {
+	if r.ContentLength > desktopapps.MaxWallpaperBytes {
 		writeError(w, 413, "too_large", "壁纸不能超过 12 MiB")
 		return
 	}
-	if err := s.Wallpaper.SetWallpaper(data); err != nil {
+	err := s.Wallpaper.SetWallpaper(http.MaxBytesReader(w, r.Body, desktopapps.MaxWallpaperBytes+1))
+	var tooLarge *http.MaxBytesError
+	switch {
+	case errors.As(err, &tooLarge):
+		writeError(w, 413, "too_large", "壁纸不能超过 12 MiB")
+		return
+	case errors.Is(err, desktopapps.ErrWallpaper):
 		writeError(w, 400, "bad_wallpaper", "请上传 JPEG、PNG 或 WebP 图片，不超过 12 MiB")
+		return
+	case err != nil:
+		s.fail(w, 500, "wallpaper_error", err)
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"custom": true})

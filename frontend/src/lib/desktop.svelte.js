@@ -57,8 +57,10 @@ export function wallpaperCSS() {
 
 export async function checkCustomWallpaper() {
   try {
-    const response = await fetch('/api/v1/desktop/wallpaper', {method:'HEAD', credentials:'same-origin'});
-    if (desktop.custom !== response.ok) desktop.custom = response.ok;
+    const response = await fetch('/api/v1/desktop/wallpaper?exists=1', {credentials:'same-origin'});
+    if (!response.ok) return;
+    const custom = (await response.json()).custom === true;
+    if (desktop.custom !== custom) desktop.custom = custom;
   } catch { /* Keep the last known state. */ }
 }
 

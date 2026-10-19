@@ -29,6 +29,9 @@ func TestSystemStatusAndSharedWallpaper(t *testing.T) {
 	if code, _ := fileRequest(t, r, "GET", "/api/v1/desktop/wallpaper", "", "", "", false); code != 404 {
 		t.Fatal("no wallpaper yet", code)
 	}
+	if code, got := fileRequest(t, r, "GET", "/api/v1/desktop/wallpaper?exists=1", "", "", "", false); code != 200 || string(got) != `{"custom":false}` {
+		t.Fatal("exists probe", code, string(got))
+	}
 	if code, _ := fileRequest(t, r, "PUT", "/api/v1/desktop/wallpaper", "not an image", "", "", true); code != 400 {
 		t.Fatal("non-image accepted", code)
 	}
@@ -41,6 +44,19 @@ func TestSystemStatusAndSharedWallpaper(t *testing.T) {
 	}
 	if code, got := fileRequest(t, r, "GET", "/api/v1/desktop/wallpaper", "", "", "", false); code != 200 || string(got) != png {
 		t.Fatal("read back", code)
+	}
+	if code, got := fileRequest(t, r, "GET", "/api/v1/desktop/wallpaper?exists=1", "", "", "", false); code != 200 || string(got) != `{"custom":true}` {
+		t.Fatal("exists probe after upload", code, string(got))
+	}
+	// Too large or empty uploads are refused and keep the current wallpaper.
+	if code, _ := fileRequest(t, r, "PUT", "/api/v1/desktop/wallpaper", png+strings.Repeat("x", desktopapps.MaxWallpaperBytes), "", "", true); code != 413 {
+		t.Fatal("oversized upload", code)
+	}
+	if code, _ := fileRequest(t, r, "PUT", "/api/v1/desktop/wallpaper", "", "", "", true); code != 400 {
+		t.Fatal("empty upload", code)
+	}
+	if code, got := fileRequest(t, r, "GET", "/api/v1/desktop/wallpaper", "", "", "", false); code != 200 || string(got) != png {
+		t.Fatal("refused uploads replaced the wallpaper", code)
 	}
 	if code, _ := fileRequest(t, r, "DELETE", "/api/v1/desktop/wallpaper", "", "", "", true); code != 200 {
 		t.Fatal("delete", code)
