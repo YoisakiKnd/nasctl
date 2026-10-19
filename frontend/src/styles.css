@@ -1360,8 +1360,9 @@ dialog {border-radius:var(--radius-lg);}
   .window-modal-layer {padding:0;}
   .window-modal-layer dialog {padding:20px 16px;}
   .album-view {display:flex; flex-direction:column; --gutter:16px;}
-  .album-view>.photo-tabs {order:1; flex-direction:row; justify-content:flex-start; gap:4px; padding:0 12px 8px; border:0; border-bottom:1px solid var(--border); background:none; overflow-x:auto;}
-  .album-view>.photo-tabs button {width:auto; flex-shrink:0; min-height:34px; padding:0 13px; font-size:13px;}
+  .album-view>.photo-tabs {order:1; flex-direction:row; justify-content:flex-start; gap:4px; padding:2px 12px 8px; border:0; border-bottom:1px solid var(--border); background:var(--surface); overflow-x:auto;}
+  .album-view>.photo-tabs button {flex-direction:row; gap:6px; width:auto; flex-shrink:0; min-height:34px; padding:0 13px; font-size:13px;}
+  .album-view>.photo-tabs button svg {width:17px; height:17px;}
   .album-view>.photo-toolbar {order:0; padding:12px var(--gutter) 6px;}
   .album-view>.photo-library,.album-view>:not(.photo-toolbar):not(.photo-tabs) {order:2; flex:1;}
   .finder-sidebar {background:var(--surface);}
