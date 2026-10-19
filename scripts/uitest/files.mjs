@@ -10,7 +10,10 @@ const check=(ok,label)=>{if(!ok)throw new Error(label);console.log('ok:',label);
 async function wait(test,label){const until=Date.now()+7000;while(Date.now()<until){if(test())return;await delay(25);}throw new Error('timed out: '+label);}
 const button=(label,scope=d)=>[...scope.querySelectorAll('button')].find((item)=>item.textContent.trim()===label);
 const row=(name)=>[...d.querySelectorAll('.finder-entry,tbody tr')].find((item)=>item.textContent.includes(name));
-const request=(path,init={})=>fetch(new URL(path,base),{...init,headers:{...init.headers,...headers}});
+// slowJobs holds back job status answers so a click always lands while a
+// finished operation's task is still settling.
+let slowJobs=false,jobAnswers=0;
+const request=async(path,init={})=>{const url=new URL(path,base);if(slowJobs&&url.pathname.startsWith('/api/v1/jobs/')){await delay(600);jobAnswers++;}return fetch(url,{...init,headers:{...init.headers,...headers}});};
 const input=(selector,value)=>{const node=d.querySelector(selector);check(node,'input '+selector);node.value=value;node.dispatchEvent(new w.Event('input',{bubbles:true}));};
 const submit=()=>d.querySelector('dialog form').dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
 const NativeXHR=w.XMLHttpRequest;
@@ -54,8 +57,11 @@ try{
   await wait(()=>!d.querySelector('dialog')&&row('拖放.txt'),'dropped file uploads into the current folder');
   check(await(await request(await downloadLink('拖放.txt'))).text()==='dropped bytes','dropped bytes match the File');
   await operation('说明.txt','改名／移动');await wait(()=>d.querySelector('dialog'),'rename dialog');
-  input('input[aria-label="文件操作目标"]',fixture+'/改名.txt');submit();
+  slowJobs=true;jobAnswers=0;input('input[aria-label="文件操作目标"]',fixture+'/改名.txt');submit();
   await wait(()=>!d.querySelector('dialog')&&row('改名.txt'),'rename updates listing');
+  row('拖放.txt').click();await delay(0);check(row('拖放.txt').classList.contains('selected')&&jobAnswers===0,'a file is selected while the rename task is still settling');
+  await wait(()=>jobAnswers>0,'rename task settles');slowJobs=false;await delay(300);
+  check(row('拖放.txt')?.classList.contains('selected')&&d.querySelector('.finder-details a[download]'),'the settled task refreshes the list without dropping that selection');
   await operation('改名.txt','移入回收站');await wait(()=>d.querySelector('dialog'),'trash review');submit();
   await wait(()=>!d.querySelector('dialog')&&!row('改名.txt'),'entry moves into trash');
   button('回收站').click();await wait(()=>row('改名.txt')&&button('恢复',row('改名.txt')),'trash listing');

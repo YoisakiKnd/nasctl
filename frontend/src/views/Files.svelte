@@ -54,14 +54,23 @@
     if(items.length>limits.batch_max_items){message=`一次最多选择 ${limits.batch_max_items} 项，请缩小选择范围。`;return false;}
     selection=items.map((item)=>({...item,_root:item._root||root}));return true;
   }
+  function keepSelection(items){
+    const present=new Set(items.map(selectionKey)),gone=(entry)=>!present.has(selectionKey(entry));
+    if(selection.some(gone))selection=selection.filter((item)=>!gone(item));
+    if(selected&&gone(selected)){++previewGeneration;clearTimeout(previewTimer);previewRequest?.abort();selected=null;previewInfo=null;previewError='';fullPreview=false;}
+    if(menu?.entry&&gone(menu.entry))menu=null;
+  }
   function selectAll(){const items=trash?listing?.items||[]:entries;if(chooseSelection(items)){selected=items.length===1&&!trash?items[0]:null;++previewGeneration;clearTimeout(previewTimer);previewRequest?.abort();previewInfo=null;previewError='';}}
-  async function load(focus=false){
-    const current=++generation;controller?.abort();controller=new AbortController();loading=true;error='';locked=false;listing=null;
+  // keep refreshes in place: the list stays on screen and the selection survives
+  // unless its items are gone. A finished background task uses it, so a click
+  // made while the task was settling is not thrown away.
+  async function load(focus=false,keep=false){
+    const current=++generation;controller?.abort();controller=new AbortController();loading=true;error='';locked=false;if(!keep)listing=null;
     if(scope!=='folder'||!root){loading=false;return;}
     const [key,order]=sort.split(':');
     try{
       const [data,rootData]=await Promise.all([api(query(trash?'/api/v1/files/trash':appliedSearch?'/api/v1/files/search':'/api/v1/files/list',{root,path:relative(path),q:appliedSearch||undefined,page,page_size:pageSize,sort:key,order}),{signal:controller.signal}),api('/api/v1/files/roots',{signal:controller.signal}).catch(()=>null)]);
-      if(!disposed&&current===generation){if(rootData)roots=rootData.roots||[];listing={...data,search:appliedSearch};loading=false;if(focus===true&&(!host||host.visible())){await tick();explorer?.querySelector('[role="option"]')?.focus();}}
+      if(!disposed&&current===generation){if(rootData)roots=rootData.roots||[];listing={...data,search:appliedSearch};loading=false;if(keep)keepSelection(data.entries||[]);if(focus===true&&(!host||host.visible())){await tick();explorer?.querySelector('[role="option"]')?.focus();}}
     }catch(failure){if(!disposed&&current===generation&&failure.name!=='AbortError'){if(failure.code==='vault_locked')locked=true;else error=failure.message;}}
     finally{if(!disposed&&current===generation)loading=false;}
   }
@@ -216,7 +225,7 @@
         {:else if selected&&!trash}<button class="finder-action" onclick={()=>open(selected)}><Icon name={selected.is_dir?'folder':'external'} size={15}/>打开</button><button class="finder-action" aria-label="所选文件更多操作" onclick={(event)=>showMenu(event)}><Icon name="more" size={17}/>更多</button>{:else}<button class="finder-action" disabled={!canWrite||trash||scope!=='folder'} title={!canWrite?'此位置为只读，无法新建':undefined} onclick={()=>operate('mkdir')}><Icon name="folderplus" size={16}/>新建文件夹</button><button class="finder-action" disabled={!canWrite||trash||scope!=='folder'} title={!canWrite?'此位置为只读，无法上传':undefined} onclick={()=>operate('upload')}><Icon name="upload" size={16}/>上传文件</button>{/if}{#if selection.length}<button class="icon-button" aria-label="取消选择" onclick={clearSelection}><Icon name="close" size={14}/></button>{/if}</div><div class="finder-sort">{#if scope==='folder'&&!trash}<button class="icon-button" class:active={pinned} aria-label={pinned?'取消固定当前目录':'固定当前目录'} disabled={!root} onclick={togglePin}><Icon name="pin" size={15}/></button>{/if}<select aria-label="文件排序" bind:value={sort} disabled={scope!=='folder'||trash} onchange={()=>{page=1;clearSelection();storeTab();load();}}><option value="name:asc">名称 ↑</option><option value="name:desc">名称 ↓</option><option value="time:desc">最新修改</option><option value="size:desc">体积最大</option><option value="kind:asc">文件类型</option></select></div></div>
       <div class="finder-scroll">
         {#if error}<ErrorNotice message={error} onretry={()=>load()}/>{/if}{#if locked}<VaultUnlock/>{/if}{#if message}<div class="notice success" role="status">{message}<button class="text-button" aria-label="关闭文件操作提示" onclick={()=>message=''}>×</button></div>{/if}
-        {#if task}{#key task}<section class="task-panel"><TaskMonitor id={task} onupdate={updateTask} onsettled={()=>{clearSelection();load();}}/>{#if batchResult}<FileBatchResult result={batchResult}/>{/if}<a class="text-button" href="#admin/jobs">在任务中心查看</a></section>{/key}{/if}
+        {#if task}{#key task}<section class="task-panel"><TaskMonitor id={task} onupdate={updateTask} onsettled={()=>load(false,true)}/>{#if batchResult}<FileBatchResult result={batchResult}/>{/if}<a class="text-button" href="#admin/jobs">在任务中心查看</a></section>{/key}{/if}
         {#if loading}<div class="loading-state" role="status">正在读取文件…</div>
         {:else if !roots.length}<section class="empty-state"><Icon name="folder" size={40}/><h2>添加第一个存储目录</h2><p>配置存储目录后，即可在这里浏览和整理文件。</p></section>
         {:else if trash}
