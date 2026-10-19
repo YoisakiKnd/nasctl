@@ -48,9 +48,12 @@ export const createVault = (password) => call('create', {password});
 export const unlockVault = (password) => call('unlock', {password});
 export const changeVaultPassword = (password, next) => call('password', {password, new_password:next});
 
+// The page shows "locked", and pages listening for it reload, only once the
+// server has locked: reloading earlier can race the lock and list private
+// content again. If the server cannot be reached, the page locks anyway.
 export async function lockVault() {
-  if (vault.status?.unlocked) settle({...vault.status, unlocked:false, expires_at:0});
-  try {settle(await api('/api/v1/album/vault/lock', {method:'POST', headers:confirm}));} catch {}
+  try {settle(await api('/api/v1/album/vault/lock', {method:'POST', headers:confirm}));}
+  catch {if (vault.status?.unlocked) settle({...vault.status, unlocked:false, expires_at:0});}
 }
 
 // A private request answered "locked" means the session ended elsewhere.
