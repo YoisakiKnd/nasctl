@@ -8,7 +8,7 @@ import (
 
 // Set with -ldflags "-X .../internal/buildinfo.Version=... ".
 var (
-	Version   = "0.8.0-dev"
+	Version   = "0.8.1-dev"
 	Commit    = "unknown"
 	BuildTime = "unknown"
 	Target    = "unknown"
