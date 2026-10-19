@@ -47,15 +47,17 @@ install -m 0644 systemd/nasctl-storage.socket systemd/nasctl-storage@.service \
 install -m 0644 udev/99-nasctl-automount.rules /etc/udev/rules.d/
 install -m 0644 tmpfiles/nasctl.conf /etc/tmpfiles.d/
 systemd-tmpfiles --create /etc/tmpfiles.d/nasctl.conf
-# 0.8.0 的 nasctl-web.service 增加了 ReadWritePaths=-/media/nasctl
-install -m 0644 systemd/nasctl-web.service /etc/systemd/system/
+# 让控制台能写入挂载的磁盘（0.8.0 起发布包里的 nasctl-web.service 已带这一行）
+mkdir -p /etc/systemd/system/nasctl-web.service.d
+printf '[Service]\nReadWritePaths=-/media/nasctl\n' \
+  > /etc/systemd/system/nasctl-web.service.d/20-storage.conf
 systemctl daemon-reload && udevadm control --reload
 systemctl enable --now nasctl-storage.socket
 systemctl restart nasctl-web
 ```
 
-如果你改过 `nasctl-web.service`，不要覆盖，只加一行 `ReadWritePaths=-/media/nasctl`
-（或放进 drop-in）。
+这里用 drop-in 而不是覆盖 `nasctl-web.service`，所以自己调整过的单元（换了配置路径、
+加了数据盘目录等）不受影响；已经装了 0.8.0 版单元文件的，多这一行也没有副作用。
 
 按需安装的软件（Debian / Ubuntu / Armbian 包名）：
 

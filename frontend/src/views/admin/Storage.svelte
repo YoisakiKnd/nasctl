@@ -78,16 +78,19 @@
 {#if view && !view.helper}
   <section class="panel settings-card storage-setup">
     <header class="settings-card-head"><span class="settings-card-icon"><Icon name="shield" size={19}/></span><div><h2>启用存储助手</h2><p class="muted">nasctl 平时以普通用户运行。挂载、格式化和共享需要 root 权限，这些操作交给一个按需启动、做完就退出的存储助手。</p></div></header>
-    <p>在 NAS 上以 root 执行一次（发布包里已经带有这些文件）：</p>
+    <p>在 NAS 上进入解压后的发布包目录，以 root 执行一次：</p>
     <pre class="command-block">install -m 0644 systemd/nasctl-storage.socket systemd/nasctl-storage@.service \
   systemd/nasctl-storage-automount@.service /etc/systemd/system/
 install -m 0644 udev/99-nasctl-automount.rules /etc/udev/rules.d/
 install -m 0644 tmpfiles/nasctl.conf /etc/tmpfiles.d/
 systemd-tmpfiles --create /etc/tmpfiles.d/nasctl.conf
+mkdir -p /etc/systemd/system/nasctl-web.service.d
+printf '[Service]\nReadWritePaths=-/media/nasctl\n' \
+  > /etc/systemd/system/nasctl-web.service.d/20-storage.conf
 systemctl daemon-reload &amp;&amp; udevadm control --reload
 systemctl enable --now nasctl-storage.socket
 systemctl restart nasctl-web</pre>
-    <p class="muted">可选软件：<code>smartmontools</code>（硬盘健康）、<code>samba</code>（局域网共享）、<code>cifs-utils</code> / <code>nfs-common</code>（网络存储）、<code>exfatprogs</code>、<code>ntfs-3g</code>。详见 STORAGE.md。</p>
+    <p class="muted">可选软件：<code>smartmontools</code>（硬盘健康）、<code>samba</code>（局域网共享）、<code>cifs-utils</code> / <code>nfs-common</code>（网络存储）、<code>exfatprogs</code>、<code>ntfs-3g</code>。详见 STORAGE.md。第 6、7 行让控制台能写入挂载的磁盘；它是单独的 drop-in，不会改动你自己调整过的 <code>nasctl-web.service</code>。</p>
   </section>
 {:else if view}
   <div class="segmented storage-tabs" role="tablist">
