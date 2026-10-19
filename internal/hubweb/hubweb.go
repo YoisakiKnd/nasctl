@@ -260,6 +260,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/files/trash", s.handleFileTrashList)
 	mux.HandleFunc("PUT /api/v1/files/upload", s.handleFileUpload)
 	mux.HandleFunc("POST /api/v1/files/copy", s.handleFileBackground)
+	mux.HandleFunc("POST /api/v1/files/extract", s.handleFileBackground)
 	mux.HandleFunc("POST /api/v1/files/move", s.handleFileBackground)
 	mux.HandleFunc("POST /api/v1/files/purge", s.handleFileBackground)
 	mux.HandleFunc("POST /api/v1/files/batch", s.handleFileBatch)

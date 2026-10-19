@@ -181,6 +181,18 @@ func Declarations() []operations.Operation {
 			},
 		},
 		{
+			ID: "files.extract", Summary: "Extract a ZIP archive into a new folder in the same root, refusing overwrites",
+			Scope: []string{"storage"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall,
+			Timeout: 2 * time.Hour, Async: true, Mutex: operations.MutexFiles,
+			Params: []operations.Param{
+				{Name: "root", Kind: operations.ParamString, Required: true, MaxLen: 32},
+				{Name: "from", Kind: operations.ParamString, Required: true, MaxLen: 1024, Doc: "the ZIP file"},
+				{Name: "to", Kind: operations.ParamString, Required: true, MaxLen: 1024, Doc: "the new folder"},
+				{Name: "limit", Kind: operations.ParamInt, Required: true, Doc: "maximum entries to extract"},
+				{Name: "max_bytes", Kind: operations.ParamInt, Required: true, Doc: "maximum extracted bytes"},
+			},
+		},
+		{
 			ID: "files.move", Summary: "Move between storage roots by copy and recoverable source trash", Scope: []string{"storage"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall, Timeout: 2 * time.Hour, Async: true, Mutex: operations.MutexFiles,
 			Params: []operations.Param{{Name: "root", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "to_root", Kind: operations.ParamString, Required: true, MaxLen: 32}, {Name: "from", Kind: operations.ParamString, Required: true, MaxLen: 1024}, {Name: "to", Kind: operations.ParamString, Required: true, MaxLen: 1024}, {Name: "limit", Kind: operations.ParamInt, Required: true}, {Name: "max_bytes", Kind: operations.ParamInt, Required: true}},
 		},

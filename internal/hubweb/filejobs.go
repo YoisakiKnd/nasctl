@@ -1,6 +1,7 @@
 package hubweb
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -173,6 +174,51 @@ func (s *Server) handleFileBackground(w http.ResponseWriter, r *http.Request) {
 			})
 			return result, err
 		}
+	} else if op == "files.extract" {
+		if input.Limit < 1 || input.Limit > s.Files.Limits().CopyMaxEntries || input.MaxBytes < 1 || input.MaxBytes > s.Files.Limits().CopyMaxBytes {
+			s.fileWriteError(w, files.ErrTreeLimit)
+			return
+		}
+		var root *files.RootInfo
+		for _, value := range s.Files.Roots() {
+			if value.ID == input.Root {
+				root = &value
+			}
+		}
+		switch {
+		case root == nil:
+			s.fileWriteError(w, files.ErrNoSuchRoot)
+			return
+		case !root.Available:
+			s.fileWriteError(w, files.ErrRootUnavailable)
+			return
+		case !root.Writable:
+			s.fileWriteError(w, files.ErrReadOnly)
+			return
+		}
+		gate := s.privateGate(r)
+		refused := gate.check(input.Root, input.From, useCopy)
+		if refused == nil {
+			refused = gate.check(input.Root, input.To, useInside)
+		}
+		if privateError(w, refused) {
+			return
+		}
+		if e, err := s.Files.Stat(input.Root, input.From); err != nil || e.IsDir {
+			s.fileWriteError(w, cmp.Or(err, files.ErrNotRegular))
+			return
+		}
+		if _, err := s.Files.Stat(input.Root, input.To); err == nil {
+			s.fileWriteError(w, files.ErrExists)
+			return
+		} else if !errors.Is(err, files.ErrNotExist) {
+			s.fileWriteError(w, err)
+			return
+		}
+		args.Str("from", input.From).Str("to", input.To).Int("limit", int64(input.Limit)).Int("max_bytes", input.MaxBytes)
+		action = func(ctx context.Context, report func(int64, int64, string)) (any, error) {
+			return s.Files.ExtractZip(ctx, input.Root, input.From, input.To, input.Limit, input.MaxBytes, func(done, total int64) { report(done, total, "bytes") })
+		}
 	} else if op == "files.purge" {
 		if input.Limit < 1 || input.Limit > s.Files.Limits().CopyMaxEntries || input.ConfirmName == "" {
 			s.fileWriteError(w, files.ErrConfirmation)
@@ -243,6 +289,11 @@ func (s *Server) handleFileBackground(w http.ResponseWriter, r *http.Request) {
 				}
 				if value.Published && err != nil {
 					detail = "目标内容已保存，源内容请核对；" + detail
+				}
+			case files.ExtractResult:
+				detail = fmt.Sprintf("解压到 %s/%s；%d 项、%d 字节", value.DestinationRoot, value.Path, value.Entries, value.Bytes)
+				if value.Links > 0 {
+					detail += fmt.Sprintf("；跳过 %d 个链接或特殊文件", value.Links)
 				}
 			case files.PurgeResult:
 				detail = fmt.Sprintf("已永久删除 %d / %d 项", value.Removed, value.Total)

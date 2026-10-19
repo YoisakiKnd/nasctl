@@ -163,7 +163,18 @@ func (m *Manager) Archive(ctx context.Context, rootID, rel string, output io.Wri
 
 // ImportArchive stages a bounded tar tree and publishes a new directory only
 // after the stream and its transport digest have both passed verification.
+// The restored tree is private to the service user.
 func (m *Manager) ImportArchive(ctx context.Context, rootID, destination string, input io.Reader, limit int, maxBytes int64, verify func() error, progress CopyProgress) (CopyResult, error) {
+	return m.importTar(ctx, rootID, destination, input, limit, maxBytes, verify, progress, false)
+}
+
+// importTar is ImportArchive; shared files and folders take the service's
+// umask, like anything else it creates, instead of being private.
+func (m *Manager) importTar(ctx context.Context, rootID, destination string, input io.Reader, limit int, maxBytes int64, verify func() error, progress CopyProgress, shared bool) (CopyResult, error) {
+	fileMode, dirMode := os.FileMode(0o600), os.FileMode(0o700)
+	if shared {
+		fileMode, dirMode = 0o666, 0o777
+	}
 	result := CopyResult{DestinationRoot: rootID, Path: destination}
 	to, e := writablePath(destination)
 	if e != nil {
@@ -261,7 +272,7 @@ func (m *Manager) ImportArchive(ctx context.Context, rootID, destination string,
 			if h.Size != 0 {
 				return result, ErrBadPath
 			}
-			if e = bucket.Mkdir(target, 0700); e != nil {
+			if e = bucket.Mkdir(target, dirMode); e != nil {
 				return result, e
 			}
 			directories = append(directories, target)
@@ -270,7 +281,7 @@ func (m *Manager) ImportArchive(ctx context.Context, rootID, destination string,
 			if name == "data" {
 				return result, ErrBadPath
 			}
-			f, e := bucket.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0600)
+			f, e := bucket.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, fileMode)
 			if e != nil {
 				return result, e
 			}

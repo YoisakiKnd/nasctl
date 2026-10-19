@@ -1,6 +1,8 @@
 package hubweb
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -162,5 +164,42 @@ func TestCancelOnlyActiveWorkAndPersistCancelledState(t *testing.T) {
 	code, _ = fileRequest(t, r, "POST", "/api/v1/jobs/nonexistent/cancel", "{}", "", "", true)
 	if code != 409 {
 		t.Fatal(code)
+	}
+}
+
+func TestFileExtractZipHTTP(t *testing.T) {
+	r := writeRig(t, nil)
+	t.Cleanup(r.srv.WaitWork)
+	var b bytes.Buffer
+	zw := zip.NewWriter(&b)
+	f, _ := zw.Create("album/1.txt")
+	_, _ = f.Write([]byte("hello"))
+	_ = zw.Close()
+	writeFile(t, filepath.Join(r.root, "album.zip"), b.String())
+	body := `{"root":"media","from":"album.zip","to":"album","limit":100,"max_bytes":1024}`
+	if code, _ := fileRequest(t, r, "POST", "/api/v1/files/extract", body, "", "", false); code != 400 {
+		t.Fatal("unconfirmed extract", code)
+	}
+	code, out := fileRequest(t, r, "POST", "/api/v1/files/extract", body, "", "", true)
+	if code != 202 {
+		t.Fatalf("%d %s", code, out)
+	}
+	job := waitFileJob(t, r, out)
+	if job.State != domain.JobCompleted || job.Progress != 5 || job.Total != 5 || job.Unit != "bytes" {
+		t.Fatalf("%+v", job)
+	}
+	if got, err := os.ReadFile(filepath.Join(r.root, "album", "album", "1.txt")); err != nil || string(got) != "hello" {
+		t.Fatal(string(got), err)
+	}
+	// The folder now exists; a second extract is refused before it starts.
+	if code, out = fileRequest(t, r, "POST", "/api/v1/files/extract", body, "", "", true); code != 409 {
+		t.Fatalf("extract over a folder: %d %s", code, out)
+	}
+	// Over the server's own budget, or from a folder rather than a file.
+	if code, _ = fileRequest(t, r, "POST", "/api/v1/files/extract", `{"root":"media","from":"album.zip","to":"x","limit":100000000,"max_bytes":1024}`, "", "", true); code != 400 {
+		t.Fatal("over budget", code)
+	}
+	if code, _ = fileRequest(t, r, "POST", "/api/v1/files/extract", `{"root":"media","from":"album","to":"x","limit":100,"max_bytes":1024}`, "", "", true); code == 202 {
+		t.Fatal("extracted a folder")
 	}
 }
