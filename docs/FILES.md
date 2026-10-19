@@ -45,6 +45,11 @@ Tab 插入制表符，有未保存修改时关闭会先确认。工具栏的“�
   服务的 umask。符号链接和硬链接不能在这里编辑（替换会断开链接）。
 - 文本永远按纯文本显示，HTML、SVG 等不会被当作页面渲染；原始预览接口也继续拒绝文本。
 - 每次保存是一条 `files.edit` 任务与审计记录，和上传一样需要操作者确认与可写目录。
+- 内存：同一时刻最多两个查看或保存把文件放在内存里，其余请求排队等候，不会失败。文本按
+  读到的字节原样作为响应体返回，不再包一层 JSON；保存时比对旧版本是边读边算哈希，不整份
+  读入。详情栏摘要只读开头 8 KiB。在 amd64 上，16 路并发反复查看、保存 1 MiB 文件时，
+  进程峰值约 31 MiB（空闲约 20 MiB），低于控制台 40 MiB 的目标；改动前同样的负载峰值约
+  71 MiB。ARM 设备上尚未实测。
 
 ## 多选与批量整理
 
@@ -190,7 +195,7 @@ API 只能降低本地预算。时间上限独立于字节上限，慢速连接�
 | --- | --- |
 | `GET /api/v1/files/roots` | 每个根目录的 writable、已实现能力和上传大小上限 |
 | `PUT /api/v1/files/upload?root=ID&path=相对路径` | 原始文件体，上传并拒绝覆盖 |
-| `GET /api/v1/files/text?root=ID&path=相对路径` | 最多 1 MiB 文本：`content`、`revision`、`truncated`、`binary` 与 `editable` |
+| `GET /api/v1/files/text?root=ID&path=相对路径[&limit=字节]` | 响应体是最多 1 MiB 的原始文本（`text/plain`）；`X-Nasctl-Size`、`X-Nasctl-Revision`、`X-Nasctl-Truncated`、`X-Nasctl-Binary`、`X-Nasctl-Editable`、`X-Nasctl-Limit` 响应头说明其余信息 |
 | `PUT /api/v1/files/text?root=ID&path=相对路径&revision=SHA256` | 原始 UTF-8 文本体；带 revision 时替换该版本，省略时只新建、拒绝覆盖；版本不符返回 409 `source_changed` |
 | `POST /api/v1/files/mkdir` | `{"root":"ID","path":"文件夹"}` |
 | `POST /api/v1/files/rename` | `{"root":"ID","from":"旧位置","to":"新位置"}` |

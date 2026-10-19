@@ -1,6 +1,6 @@
 <script>
   import { onDestroy } from 'svelte';
-  import { api, query } from '../lib/api.js';
+  import { api, apiText, query } from '../lib/api.js';
   import { bytes } from '../lib/format.js';
   import ErrorNotice from './ErrorNotice.svelte';
   // compact: a short read-only excerpt for the details pane. Otherwise the
@@ -12,7 +12,10 @@
   async function load() {
     controller?.abort(); controller = new AbortController(); error = ''; saveError = null;
     try {
-      data = await api(query('/api/v1/files/text', { root, path }), { signal: controller.signal });
+      // The excerpt asks only for what it shows.
+      const { text, headers } = await apiText(query('/api/v1/files/text', { root, path, limit: compact ? 8192 : undefined }), { signal: controller.signal });
+      const flag = (name) => headers.get('X-Nasctl-' + name) === 'true';
+      data = { text: { content: text, size: Number(headers.get('X-Nasctl-Size')), truncated: flag('Truncated'), binary: flag('Binary'), revision: headers.get('X-Nasctl-Revision') }, limit: Number(headers.get('X-Nasctl-Limit')), editable: flag('Editable') };
       draft = data.text.content; dirty = false;
       if (startEditing && canEdit()) edit();
     } catch (failure) { if (failure.name !== 'AbortError') error = failure.message; }
@@ -51,7 +54,7 @@
     {:else if !data}<p class="field-help" role="status">正在读取…</p>
     {:else if data.text.binary}<p class="field-help">这个文件不是 UTF-8 文本，无法预览。</p>
     {:else if !data.text.content}<p class="field-help">空文件</p>
-    {:else}<pre aria-label="文本预览">{data.text.content.slice(0, 2000)}</pre>{/if}
+    {:else}<pre aria-label="文本预览">{data.text.content.slice(0, 2000)}{#if data.text.truncated || data.text.content.length > 2000}…{/if}</pre>{/if}
   </div>
 {:else}
   <div class="text-file">

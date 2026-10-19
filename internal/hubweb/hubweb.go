@@ -135,6 +135,9 @@ type Server struct {
 	// not consume the slots that keep the UI responsive.
 	requestSlots chan struct{}
 	streamSlots  chan struct{}
+	// textSlots bounds how many text views and saves hold a file in memory
+	// at once (up to files.TextMaxBytes each).
+	textSlots chan struct{}
 
 	// previews caches small derived facts (not file contents) to avoid
 	// re-stat'ing on every thumbnail request.
@@ -193,6 +196,7 @@ func New(cfg Config, fm *files.Manager, jm *jobs.Manager, sc *suzu.Client, log *
 		Version:      buildinfo.Version,
 		requestSlots: make(chan struct{}, cfg.MaxConcurrentRequests),
 		streamSlots:  make(chan struct{}, cfg.MaxConcurrentStreams),
+		textSlots:    make(chan struct{}, 2),
 	}
 }
 

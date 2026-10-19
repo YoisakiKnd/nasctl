@@ -14,7 +14,17 @@ export class APIError extends Error {
 // Bounded fetches, with the caller's cancellation propagated to the request.
 // Authentication remains in the same-origin cookie; secrets are never stored
 // in localStorage or appended to download URLs.
-export async function api(path, options = {}) {
+export function api(path, options = {}) {
+  return call(path, options, (response) => response.json().catch(() => null));
+}
+
+// apiText is api for an endpoint that answers with plain text: the body and
+// the response headers. Errors still arrive as JSON.
+export function apiText(path, options = {}) {
+  return call(path, options, async (response) => ({ text: await response.text(), headers: response.headers }));
+}
+
+async function call(path, options, read) {
   const { signal, timeoutMs = 20_000, ...init } = options;
   const controller = new AbortController();
   const abort = () => controller.abort(signal?.reason);
@@ -24,12 +34,12 @@ export async function api(path, options = {}) {
   const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, Math.min(55_000, Math.max(1_000, timeoutMs)));
   try {
     const response = await fetch(path, { ...init, credentials: 'same-origin', signal: controller.signal });
-    const body = await response.json().catch(() => null);
     if (!response.ok) {
+      const body = await response.json().catch(() => null);
       if (response.status === 401 && !path.startsWith('/api/v1/auth/')) window.dispatchEvent(new CustomEvent('nasctl:unauthorized'));
       throw new APIError(body?.message || `请求失败（${response.status}）`, response.status, body?.error, [body?.detail, body?.error && `错误代码：${body.error} · HTTP ${response.status}`].filter(Boolean).join('\n'));
     }
-    return body;
+    return await read(response);
   } catch (error) {
     if (timedOut) throw new APIError('请求超时，请检查连接后重试', 408, 'timeout');
     throw error;

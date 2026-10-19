@@ -25,21 +25,23 @@ const TextMaxBytes = 1 << 20
 // editor showed whole: binary or truncated content, a symlink or a hard link.
 var ErrNotText = errors.New("files: not an editable text file")
 
-// Text is a text file as the viewer and editor see it.
+// Text is a text file as the viewer and editor see it. Content is the bytes
+// as read, not a string copy: the console serves it as is.
 type Text struct {
-	Content   string    `json:"content"`
-	Size      int64     `json:"size"`
-	ModTime   time.Time `json:"mod_time"`
-	Truncated bool      `json:"truncated"`
+	Content   []byte
+	Size      int64
+	ModTime   time.Time
+	Truncated bool
 	// Binary is set when the bytes are not UTF-8 text; Content is then empty.
-	Binary bool `json:"binary"`
+	Binary bool
 	// Revision identifies the exact bytes shown (SHA-256). Saving requires it,
 	// so an edit never silently replaces a newer version. It is empty when the
-	// file cannot be edited.
-	Revision string `json:"revision"`
+	// file was not read whole.
+	Revision string
 }
 
-func revision(b []byte) string {
+// Revision names content the way Text.Revision and SaveText do.
+func Revision(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
@@ -50,20 +52,27 @@ func looksText(b []byte) bool {
 	return utf8.Valid(b) && bytes.IndexByte(b, 0) < 0
 }
 
-// ReadText reads up to TextMaxBytes of a regular file.
-func (m *Manager) ReadText(rootID, rel string) (*Text, error) {
+// ReadText reads up to limit bytes of a regular file, at most TextMaxBytes.
+// The buffer is sized from the file, so a small file costs a small read.
+func (m *Manager) ReadText(rootID, rel string, limit int) (*Text, error) {
+	if limit <= 0 || limit > TextMaxBytes {
+		limit = TextMaxBytes
+	}
 	f, info, err := m.Open(rootID, rel)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, TextMaxBytes+1))
-	if err != nil {
+	// One byte more than will be kept tells a file that fits from one that
+	// does not.
+	b := make([]byte, min(max(info.Size(), 0), int64(limit))+1)
+	n, err := io.ReadFull(f, b)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return nil, mapErr(err)
 	}
 	t := &Text{Size: info.Size(), ModTime: info.ModTime()}
-	if len(b) > TextMaxBytes {
-		b, t.Truncated = b[:TextMaxBytes], true
+	if b = b[:n]; n == cap(b) {
+		b, t.Truncated = b[:n-1], true
 		// Do not judge a character cut in half at the boundary.
 		for i := 0; i < utf8.UTFMax && len(b) > 0 && !utf8.Valid(b); i++ {
 			b = b[:len(b)-1]
@@ -73,9 +82,9 @@ func (m *Manager) ReadText(rootID, rel string) (*Text, error) {
 		t.Binary = true
 		return t, nil
 	}
-	t.Content = string(b)
+	t.Content = b
 	if !t.Truncated {
-		t.Revision = revision(b)
+		t.Revision = Revision(b)
 	}
 	return t, nil
 }
@@ -128,12 +137,14 @@ func (m *Manager) SaveText(ctx context.Context, id, rel string, content []byte, 
 		if err != nil {
 			return nil, mapWriteErr(err)
 		}
-		old, err := io.ReadAll(io.LimitReader(f, TextMaxBytes+1))
+		// Hash the old bytes as they stream past rather than holding them.
+		sum := sha256.New()
+		n, err := io.Copy(sum, io.LimitReader(f, TextMaxBytes+1))
 		_ = f.Close()
 		if err != nil {
 			return nil, mapWriteErr(err)
 		}
-		if len(old) > TextMaxBytes || revision(old) != rev {
+		if n > TextMaxBytes || hex.EncodeToString(sum.Sum(nil)) != rev {
 			return nil, ErrSourceChanged
 		}
 		mode = info.Mode().Perm()

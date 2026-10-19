@@ -19,23 +19,27 @@ func TestReadTextBoundsAndRecognisesBinary(t *testing.T) {
 		}
 	}
 	write("note.md", "# 标题\n正文\n")
-	text, err := m.ReadText("data", "note.md")
-	if err != nil || text.Content != "# 标题\n正文\n" || text.Binary || text.Truncated || len(text.Revision) != 64 {
+	text, err := m.ReadText("data", "note.md", 0)
+	if err != nil || string(text.Content) != "# 标题\n正文\n" || text.Binary || text.Truncated || len(text.Revision) != 64 {
 		t.Fatalf("text = %+v, %v", text, err)
 	}
 	write("blob.txt", "PK\x00\x03binary")
-	if text, err = m.ReadText("data", "blob.txt"); err != nil || !text.Binary || text.Content != "" || text.Revision != "" {
+	if text, err = m.ReadText("data", "blob.txt", 0); err != nil || !text.Binary || string(text.Content) != "" || text.Revision != "" {
 		t.Fatalf("binary = %+v, %v", text, err)
 	}
 	write("latin1.txt", "caf\xe9")
-	if text, _ = m.ReadText("data", "latin1.txt"); !text.Binary {
+	if text, _ = m.ReadText("data", "latin1.txt", 0); !text.Binary {
 		t.Fatalf("invalid UTF-8 shown as text: %+v", text)
 	}
 	// A multi-byte character cut at the limit still reads as text.
 	write("big.log", strings.Repeat("a", TextMaxBytes-1)+"中文")
-	text, err = m.ReadText("data", "big.log")
+	text, err = m.ReadText("data", "big.log", 0)
 	if err != nil || !text.Truncated || text.Binary || text.Revision != "" || len(text.Content) != TextMaxBytes-1 {
 		t.Fatalf("truncated = binary %v truncated %v rev %q len %d, %v", text.Binary, text.Truncated, text.Revision, len(text.Content), err)
+	}
+	// An excerpt reads only what it shows.
+	if text, err = m.ReadText("data", "note.md", 4); err != nil || string(text.Content) != "# " || !text.Truncated || text.Binary || text.Revision != "" {
+		t.Fatalf("excerpt = %+v, %v", text, err)
 	}
 }
 
@@ -55,7 +59,7 @@ func TestSaveTextCreatesAndReplacesOnlyTheLoadedRevision(t *testing.T) {
 	if err := os.Chmod(path, 0o664); err != nil {
 		t.Fatal(err)
 	}
-	loaded, _ := m.ReadText("data", "new.txt")
+	loaded, _ := m.ReadText("data", "new.txt", 0)
 	// Someone else changes the file after it was loaded.
 	if err := os.WriteFile(path, []byte("changed elsewhere\n"), 0o664); err != nil {
 		t.Fatal(err)
@@ -66,7 +70,7 @@ func TestSaveTextCreatesAndReplacesOnlyTheLoadedRevision(t *testing.T) {
 	if b, _ := os.ReadFile(path); string(b) != "changed elsewhere\n" {
 		t.Fatalf("the newer content was lost: %q", b)
 	}
-	current, _ := m.ReadText("data", "new.txt")
+	current, _ := m.ReadText("data", "new.txt", 0)
 	e, err := m.SaveText(ctx, "data", "new.txt", []byte("mine\n"), current.Revision)
 	if err != nil || e.Size != 5 {
 		t.Fatalf("save = %+v, %v", e, err)
@@ -86,7 +90,7 @@ func TestSaveTextRefusesWhatItCannotSafelyReplace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "real.txt"), []byte("real"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	rev := revision([]byte("real"))
+	rev := Revision([]byte("real"))
 	if err := os.Symlink("real.txt", filepath.Join(root, "link.txt")); err != nil {
 		t.Fatal(err)
 	}

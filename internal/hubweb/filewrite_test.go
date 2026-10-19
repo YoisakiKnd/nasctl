@@ -233,20 +233,33 @@ func TestTextViewAndEditOverHTTP(t *testing.T) {
 	if json.Unmarshal(b, &stat); code != 200 || stat.PreviewKind != "text" || !stat.Previewable {
 		t.Fatalf("stat: %d %s", code, b)
 	}
-	var view struct {
-		Text     files.Text `json:"text"`
-		Editable bool       `json:"editable"`
+	response, err := r.client.Get(r.ts.URL + "/api/v1/files/text?root=media&path=readme.md")
+	if err != nil {
+		t.Fatal(err)
 	}
-	code, b = fileRequest(t, r, "GET", "/api/v1/files/text?root=media&path=readme.md", "", "", "", false)
-	if json.Unmarshal(b, &view); code != 200 || view.Text.Content != "# hi\n" || !view.Editable {
-		t.Fatalf("text: %d %s", code, b)
+	b, _ = io.ReadAll(response.Body)
+	response.Body.Close()
+	h := response.Header
+	rev := h.Get("X-Nasctl-Revision")
+	if response.StatusCode != 200 || string(b) != "# hi\n" || rev != files.Revision(b) || h.Get("X-Nasctl-Editable") != "true" ||
+		h.Get("X-Nasctl-Truncated") != "false" || !strings.HasPrefix(h.Get("Content-Type"), "text/plain") || h.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("text: %d %q %v", response.StatusCode, b, h)
 	}
-	save := "/api/v1/files/text?root=media&path=readme.md&revision=" + view.Text.Revision
+	// An excerpt reads only the start and is never editable.
+	if response, err = r.client.Get(r.ts.URL + "/api/v1/files/text?root=media&path=readme.md&limit=2"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = io.ReadAll(response.Body)
+	response.Body.Close()
+	if string(b) != "# " || response.Header.Get("X-Nasctl-Editable") != "false" || response.Header.Get("X-Nasctl-Size") != "5" {
+		t.Fatalf("excerpt: %q %v", b, response.Header)
+	}
+	save := "/api/v1/files/text?root=media&path=readme.md&revision=" + rev
 	if code, _ = fileRequest(t, r, "PUT", save, "# hello\n", "", "", false); code != 400 {
 		t.Fatalf("unconfirmed save ran: %d", code)
 	}
 	code, b = fileRequest(t, r, "PUT", save, "# hello\n", "", "", true)
-	if code != 200 || !strings.Contains(string(b), `"revision"`) {
+	if code != 200 || !strings.Contains(string(b), `"revision":"`+files.Revision([]byte("# hello\n"))+`"`) {
 		t.Fatalf("save: %d %s", code, b)
 	}
 	// The same, now stale, revision cannot overwrite the saved content.

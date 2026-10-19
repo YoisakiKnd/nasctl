@@ -11,7 +11,7 @@ const button=(label,scope=d)=>[...scope.querySelectorAll('button')].find((node)=
 const option=(name)=>[...d.querySelectorAll('.finder-entry')].find((node)=>node.querySelector('.entry-label').textContent===name);
 const type=async(node,value)=>{node.value=value;node.dispatchEvent(new w.Event('input',{bubbles:true}));await delay(20);};
 const name='generated-note-'+Date.now().toString(36)+'.md';
-let root='';const text=async()=>(await(await request('/api/v1/files/text?root='+root+'&path='+encodeURIComponent(name))).json()).text;
+let root='';const text=async()=>{const response=await request('/api/v1/files/text?root='+root+'&path='+encodeURIComponent(name));return{content:await response.text(),revision:response.headers.get('X-Nasctl-Revision')};};
 w.fetch=request;w.AbortController=AbortController;w.Blob=Blob;w.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});w.confirm=()=>true;
 w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','');};w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open');};
 try{
