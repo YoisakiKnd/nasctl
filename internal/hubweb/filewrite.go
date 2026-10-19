@@ -47,6 +47,8 @@ func (s *Server) fileWriteError(w http.ResponseWriter, err error) {
 		status, code, message = 400, "tree_limit", "操作达到条目、深度或总字节上限，请拆分任务"
 	case errors.Is(err, files.ErrSourceChanged):
 		status, code, message = 409, "source_changed", "源内容已变化，请核对后重新发起操作"
+	case errors.Is(err, files.ErrNotText):
+		status, code, message = 409, "not_text", "只能编辑完整显示的 UTF-8 文本文件；符号链接和硬链接不在这里编辑"
 	case errors.Is(err, files.ErrConfirmation):
 		status, code, message = 400, "confirmation_required", "请准确输入待永久删除的回收项名称"
 	case errors.Is(err, files.ErrBusy), errors.Is(err, jobs.ErrBusy):

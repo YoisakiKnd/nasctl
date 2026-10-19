@@ -138,6 +138,17 @@ func Declarations() []operations.Operation {
 			},
 		},
 		{
+			ID: "files.edit", Summary: "Create a text file, or replace one whose loaded revision still matches",
+			Scope: []string{"storage"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall,
+			Timeout: 60 * time.Second,
+			Params: []operations.Param{
+				{Name: "root", Kind: operations.ParamString, Required: true, MaxLen: 32},
+				{Name: "path", Kind: operations.ParamString, Required: true, MaxLen: 1024},
+				{Name: "size", Kind: operations.ParamInt, Doc: "bytes written"},
+				{Name: "mode", Kind: operations.ParamEnum, Enum: []string{"create", "replace"}},
+			},
+		},
+		{
 			ID: "files.mkdir", Summary: "Create one directory in writable storage",
 			Scope: []string{"storage"}, Class: domain.RiskMutating, Approval: domain.ApprovalPerCall,
 			Timeout: 30 * time.Second, Idempotent: true,

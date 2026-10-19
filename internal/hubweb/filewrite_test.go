@@ -221,3 +221,53 @@ func TestStoppingServiceInterruptsUploadAndRecordsCancellation(t *testing.T) {
 		t.Fatalf("upload terminal state: %+v %v", jobs, err)
 	}
 }
+
+func TestTextViewAndEditOverHTTP(t *testing.T) {
+	r := writeRig(t, nil)
+	writeFile(t, filepath.Join(r.root, "readme.md"), "# hi\n")
+	code, b := fileRequest(t, r, "GET", "/api/v1/files/stat?root=media&path=readme.md", "", "", "", false)
+	var stat struct {
+		PreviewKind string `json:"preview_kind"`
+		Previewable bool   `json:"previewable"`
+	}
+	if json.Unmarshal(b, &stat); code != 200 || stat.PreviewKind != "text" || !stat.Previewable {
+		t.Fatalf("stat: %d %s", code, b)
+	}
+	var view struct {
+		Text     files.Text `json:"text"`
+		Editable bool       `json:"editable"`
+	}
+	code, b = fileRequest(t, r, "GET", "/api/v1/files/text?root=media&path=readme.md", "", "", "", false)
+	if json.Unmarshal(b, &view); code != 200 || view.Text.Content != "# hi\n" || !view.Editable {
+		t.Fatalf("text: %d %s", code, b)
+	}
+	save := "/api/v1/files/text?root=media&path=readme.md&revision=" + view.Text.Revision
+	if code, _ = fileRequest(t, r, "PUT", save, "# hello\n", "", "", false); code != 400 {
+		t.Fatalf("unconfirmed save ran: %d", code)
+	}
+	code, b = fileRequest(t, r, "PUT", save, "# hello\n", "", "", true)
+	if code != 200 || !strings.Contains(string(b), `"revision"`) {
+		t.Fatalf("save: %d %s", code, b)
+	}
+	// The same, now stale, revision cannot overwrite the saved content.
+	code, b = fileRequest(t, r, "PUT", save, "# lost\n", "", "", true)
+	if code != 409 || !strings.Contains(string(b), "source_changed") {
+		t.Fatalf("stale save: %d %s", code, b)
+	}
+	if got, _ := os.ReadFile(filepath.Join(r.root, "readme.md")); string(got) != "# hello\n" {
+		t.Fatalf("content = %q", got)
+	}
+	// Without a revision a file is only ever created.
+	if code, b = fileRequest(t, r, "PUT", "/api/v1/files/text?root=media&path=readme.md", "", "", "", true); code != 409 {
+		t.Fatalf("create over an existing file: %d %s", code, b)
+	}
+	if code, b = fileRequest(t, r, "PUT", "/api/v1/files/text?root=media&path=todo.txt", "", "", "", true); code != 200 {
+		t.Fatalf("create: %d %s", code, b)
+	}
+	if info, err := os.Stat(filepath.Join(r.root, "todo.txt")); err != nil || info.Size() != 0 {
+		t.Fatalf("created file: %v %v", info, err)
+	}
+	if code, _ = fileRequest(t, r, "PUT", "/api/v1/files/text?root=media&path=big.txt", strings.Repeat("x", files.TextMaxBytes+1), "", "", true); code != 413 {
+		t.Fatalf("oversized save: %d", code)
+	}
+}

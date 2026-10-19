@@ -155,7 +155,7 @@ func TestMutatingFileOperationsDeclareTheirMutex(t *testing.T) {
 			continue
 		}
 		switch op.ID {
-		case "files.mkdir", "files.rename", "files.trash", "files.restore":
+		case "files.mkdir", "files.rename", "files.trash", "files.restore", "files.edit":
 			// Single-entry operations with a short timeout; serialisation comes
 			// from the store, not from a class lock.
 			continue

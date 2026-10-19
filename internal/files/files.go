@@ -398,11 +398,16 @@ func Kind(name string, isDir bool) string {
 		return "audio"
 	case ".zip", ".tar", ".gz", ".xz", ".7z", ".rar":
 		return "archive"
-	case ".nfo", ".srt", ".ass", ".sub", ".txt", ".md", ".json", ".toml", ".yaml", ".yml":
+	case ".nfo", ".srt", ".ass", ".ssa", ".sub", ".vtt", ".lrc", ".cue", ".txt", ".md", ".markdown", ".rst",
+		".json", ".toml", ".yaml", ".yml", ".ini", ".conf", ".cfg", ".env", ".properties", ".xml", ".csv", ".tsv",
+		".log", ".m3u", ".m3u8", ".sh", ".py", ".js", ".go", ".css", ".html", ".htm", ".sql":
 		return "text"
-	default:
-		return "other"
 	}
+	switch strings.ToLower(name) {
+	case "readme", "license", "changelog", "makefile", "dockerfile", ".gitignore", ".env":
+		return "text"
+	}
+	return "other"
 }
 
 // Pages returns how many pages this listing's total implies, at least one. The

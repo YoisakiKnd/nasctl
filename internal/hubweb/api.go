@@ -614,6 +614,11 @@ func (s *Server) handleFileStat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kind, previewable := files.PreviewKind(e.Name)
+	if e.Kind == "text" {
+		// Text is read through /api/v1/files/text, bounded and checked, never
+		// streamed raw into the page.
+		kind, previewable = "text", true
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"entry": entryDoc{
 			Name: e.Name, Path: e.Path, IsDir: e.IsDir, Size: e.Size,

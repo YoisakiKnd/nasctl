@@ -243,6 +243,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/files/stat", s.handleFileStat)
 	mux.HandleFunc("GET /api/v1/files/search", s.handleFileSearch)
 	mux.HandleFunc("GET /api/v1/files/preview", s.handleFilePreview)
+	mux.HandleFunc("GET /api/v1/files/text", s.handleFileText)
+	mux.HandleFunc("PUT /api/v1/files/text", s.handleFileTextSave)
 	mux.HandleFunc("GET /api/v1/files/download", s.handleFileDownload)
 	mux.HandleFunc("HEAD /api/v1/files/download", s.handleFileDownload)
 	mux.HandleFunc("GET /api/v1/files/archive", s.handleFolderDownload)
