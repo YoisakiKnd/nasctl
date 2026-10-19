@@ -606,8 +606,8 @@ func (r *Runner) estimateCost(col config.Collection, ref store.MediaRef) int64 {
 		}
 		scale := jpegscale.ScaleFor(info.Width, info.Height, edge)
 		decoded := int64((info.Width*scale+7)/8) * int64((info.Height*scale+7)/8)
-		return runtimeBytes + decoded*3 + info.CoefficientBytes + int64(edge)*int64(edge)*8
-	case r.vipsPath != "":
+		return runtimeBytes + decoded*3 + info.CoefficientBytes(scale) + int64(edge)*int64(edge)*8
+	case r.vipsPath != "" && format != "png":
 		// libvips decodes other formats at full size (HEIC, PNG) or streams
 		// them; give such files the worker to themselves.
 		return exclusive

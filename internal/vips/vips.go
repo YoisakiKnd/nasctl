@@ -23,7 +23,9 @@ import (
 
 // Formats are the source formats handed to libvips. GIF stays with the Go
 // decoder, which reads only the first frame by design.
-var Formats = map[string]bool{"jpeg": true, "png": true, "webp": true, "tiff": true, "heic": true, "heif": true, "avif": true}
+// PNG is not among them: the built-in streaming decoder (internal/pngscale)
+// needs less memory than libvips does for it, interlaced files included.
+var Formats = map[string]bool{"jpeg": true, "webp": true, "tiff": true, "heic": true, "heif": true, "avif": true}
 
 // ExtraExtensions are extensions that only libvips can turn into thumbnails.
 var ExtraExtensions = map[string]bool{"heic": true, "heif": true, "avif": true, "tif": true, "tiff": true}

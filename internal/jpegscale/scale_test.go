@@ -8,6 +8,9 @@ import (
 	"image/jpeg"
 	"math"
 	"os"
+	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -147,5 +150,44 @@ func TestConfigAndProgressive(t *testing.T) {
 	}
 	if _, err := DecodeScaled(bytes.NewReader(data), 3); err == nil {
 		t.Fatal("unsupported scale accepted")
+	}
+}
+
+// TestProgressiveKeepsOnlyWhatItReads: a progressive decode at a reduced
+// scale drops the coefficients the reduced IDCT never reads, keeping only
+// whether they are non-zero for the refinement scans. The pixels must be the
+// same as when every coefficient is kept.
+func TestProgressiveKeepsOnlyWhatItReads(t *testing.T) {
+	files, _ := filepath.Glob("testdata/progressive*.jpg")
+	more, _ := filepath.Glob(filepath.Join(runtime.GOROOT(), "src", "image", "testdata", "*progressive*.jpeg"))
+	files = append(files, more...)
+	if len(files) < 2 {
+		t.Fatal("no progressive test images")
+	}
+	decode := func(f string, scale int) image.Image {
+		r, err := os.Open(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Close()
+		m, err := DecodeScaled(r, scale)
+		if err != nil {
+			t.Fatalf("%s at %d: %v", f, scale, err)
+		}
+		return m
+	}
+	for _, f := range files {
+		for _, scale := range []int{1, 2, 4} {
+			keepAllCoefficients = true
+			want := decode(f, scale)
+			keepAllCoefficients = false
+			got := decode(f, scale)
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("%s at scale %d: compact coefficients changed the pixels", filepath.Base(f), scale)
+			}
+		}
+	}
+	if CoefficientBlockBytes(1) != 10 || CoefficientBlockBytes(8) != 128 {
+		t.Errorf("block costs %d and %d", CoefficientBlockBytes(1), CoefficientBlockBytes(8))
 	}
 }

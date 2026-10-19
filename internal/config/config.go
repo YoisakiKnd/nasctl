@@ -175,9 +175,9 @@ type Formats struct {
 	// bounded atom walk. No external tool, very little memory.
 	VideoProbe bool `toml:"video_probe"`
 
-	// UseVips hands PNG, WebP, TIFF, HEIC and AVIF thumbnails to libvips'
-	// `vips` tool when it is installed: it streams large images and reads the
-	// formats Go cannot. Without it nasctl uses its own decoders. VipsPath is
+	// UseVips hands WebP, TIFF, HEIC and AVIF thumbnails to libvips' `vips`
+	// tool when it is installed: it streams large images and reads the
+	// formats Go cannot. PNG stays built in, which streams with less memory. Without it nasctl uses its own decoders. VipsPath is
 	// a name looked up in PATH or an absolute path.
 	UseVips  bool   `toml:"use_vips"`
 	VipsPath string `toml:"vips_path"`

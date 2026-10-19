@@ -19,6 +19,7 @@ import (
 	"github.com/YoisakiKnd/nasctl/internal/exif"
 	"github.com/YoisakiKnd/nasctl/internal/jpegscale"
 	"github.com/YoisakiKnd/nasctl/internal/mimetype"
+	"github.com/YoisakiKnd/nasctl/internal/pngscale"
 	"github.com/YoisakiKnd/nasctl/internal/vips"
 )
 
@@ -412,6 +413,11 @@ func ProbeBytes(data []byte, fileSize int64, ext string, budget Budget, lim Limi
 		if r.Format == "jpeg" {
 			r.DecodedPixels, r.EstimatedDecodeBytes = EstimateJPEG(r.Width, r.Height, r.Progressive, budget.ThumbMaxEdge)
 		}
+		if r.Format == "png" && r.Width > 0 && r.Height > 0 {
+			// PNG streams into the thumbnail; only that is ever held whole.
+			tw, th := pngscale.Size(r.Width, r.Height, budget.ThumbMaxEdge)
+			r.DecodedPixels = int64(tw) * int64(th)
+		}
 	}
 
 	if r.UnsupportedReason == "" {
@@ -553,6 +559,10 @@ func EstimateDecodeBytes(kind Kind, format string, pixels int64, w, h, thumbEdge
 		thumbEdge = 512
 	}
 	const overhead = 8 << 20
+	if format == "png" && w > 0 && h > 0 {
+		// Streamed row by row into the thumbnail: the source size barely counts.
+		return pngscale.EstimateBytes(w, h, thumbEdge) + overhead
+	}
 	perPixel := 5.5
 	switch format {
 	case "png":
@@ -573,8 +583,9 @@ func EstimateDecodeBytes(kind Kind, format string, pixels int64, w, h, thumbEdge
 // EstimateJPEG is the decode estimate for a JPEG thumbnail. The image is
 // decoded at the smallest scale that still reaches the thumbnail edge, so it
 // costs that size rather than the photo's: three bytes a pixel covers 4:4:4.
-// A progressive image also holds every coefficient until its last scan,
-// counted here as three full-resolution components (the 4:4:4 worst case).
+// A progressive image also holds its coefficients until its last scan, only
+// those the reduced decode reads, counted as three full-resolution
+// components (the 4:4:4 worst case).
 func EstimateJPEG(w, h int, progressive bool, thumbEdge int) (decodedPixels, bytes int64) {
 	if thumbEdge <= 0 {
 		thumbEdge = 512
@@ -584,7 +595,8 @@ func EstimateJPEG(w, h int, progressive bool, thumbEdge int) (decodedPixels, byt
 	decodedPixels = dw * dh
 	bytes = decodedPixels*3 + int64(thumbEdge)*int64(thumbEdge)*4*2 + 8<<20
 	if progressive {
-		bytes += int64(w) * int64(h) * 3 * 4
+		blocks := int64((w+15)/8) * int64((h+15)/8) * 3
+		bytes += blocks * jpegscale.CoefficientBlockBytes(scale)
 	}
 	return decodedPixels, bytes
 }

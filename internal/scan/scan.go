@@ -425,7 +425,9 @@ func (r *Runner) budget() probe.Budget {
 // budget are not probed again on every scan.
 func (r *Runner) requeueForPolicy(ctx context.Context, code string, colID int64) (int64, error) {
 	b := r.budget()
-	policy := fmt.Sprintf("2|%d|%d|%d|%d|%t|%t", b.MaxPixels, b.MaxFileBytes, b.MaxDecodeBytes, b.ThumbMaxEdge, b.Vips, b.Vips && b.VipsJPEG)
+	// 3: PNG streams and progressive JPEG keeps only the coefficients it
+	// reads, so files once over budget or stopped at the worker ceiling fit.
+	policy := fmt.Sprintf("3|%d|%d|%d|%d|%t|%t", b.MaxPixels, b.MaxFileBytes, b.MaxDecodeBytes, b.ThumbMaxEdge, b.Vips, b.Vips && b.VipsJPEG)
 	key := "decode_policy:" + code
 	if current, ok, err := r.Store.GetState(ctx, key); err != nil || ok && current == policy {
 		return 0, err

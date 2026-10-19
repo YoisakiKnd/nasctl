@@ -1641,3 +1641,38 @@ func TestTimelineGroupsByDay(t *testing.T) {
 		t.Error("TakenSrcIsFallback(exif) = true; a real capture time must not be labelled a fallback")
 	}
 }
+
+// TestRequeueRetriesThumbnailsStoppedByMemory: a decoder change can make a
+// file that hit the worker's memory ceiling fit, so a policy change queues
+// it again, even after its attempts ran out. Ordinary failures stay failed.
+func TestRequeueRetriesThumbnailsStoppedByMemory(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	col := seedCollection(t, s)
+	refs := map[string]int64{}
+	for _, name := range []string{"rss.png", "oom.jpg", "broken.jpg"} {
+		ref, err := s.UpsertMedia(ctx, scanRow(col, name, 100, 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		refs[name] = ref.ID
+		if err := s.SetProbe(ctx, ProbeUpdate{ID: ref.ID, State: ProbeOK, Format: "png", Width: 6000, Height: 8000, Pixels: 48_000_000}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, reason := range map[string]string{"rss.png": "worker_rss_over_max", "oom.jpg": "cgroup_oom_kill", "broken.jpg": "undecodable"} {
+		if err := s.SetThumb(ctx, ThumbUpdate{ID: refs[name], State: ThumbFailed, Reason: reason, NextAttemptAt: UnixNow() + 3600, At: UnixNow()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := s.RequeueSkipped(ctx, col, nil)
+	if err != nil || n != 2 {
+		t.Fatalf("requeued %d, %v; want the two stopped by memory", n, err)
+	}
+	for name, want := range map[string]string{"rss.png": ThumbPending, "oom.jpg": ThumbPending, "broken.jpg": ThumbFailed} {
+		m, err := s.GetMedia(ctx, refs[name])
+		if err != nil || m.ThumbState != want {
+			t.Errorf("%s: thumb state %q, want %q (%v)", name, m.ThumbState, want, err)
+		}
+	}
+}

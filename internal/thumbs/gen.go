@@ -43,6 +43,7 @@ import (
 	"github.com/YoisakiKnd/nasctl/internal/exif"
 	"github.com/YoisakiKnd/nasctl/internal/fsutil"
 	"github.com/YoisakiKnd/nasctl/internal/jpegscale"
+	"github.com/YoisakiKnd/nasctl/internal/pngscale"
 	"github.com/YoisakiKnd/nasctl/internal/probe"
 	"github.com/YoisakiKnd/nasctl/internal/vips"
 )
@@ -212,7 +213,17 @@ func Generate(srcPath, dstPath string, expectSize, expectMtimeNS int64, opt Opti
 	var cfg image.Config
 	goReadable := format == "jpeg" || format == "png" || format == "gif" || format == "webp"
 	if goReadable {
-		cfg, _, err = image.DecodeConfig(f)
+		if format == "png" {
+			// image/png refuses a huge header on 32-bit builds without saying
+			// how big it is; this reader reports the size it then refuses.
+			info, perr := pngscale.Inspect(f)
+			cfg, err = image.Config{Width: info.Width, Height: info.Height}, perr
+			if info.Width > 0 && info.Height > 0 && errors.Is(perr, pngscale.ErrUnsupported) {
+				err = nil // judged by size below; anything else fails the decode
+			}
+		} else {
+			cfg, _, err = image.DecodeConfig(f)
+		}
 		if err != nil {
 			return out.skip("undecodable_header", "header could not be decoded: "+err.Error())
 		}
@@ -249,8 +260,21 @@ func Generate(srcPath, dstPath string, expectSize, expectMtimeNS int64, opt Opti
 	}
 
 	var src image.Image
+	var dst *image.RGBA
 	orientation := 1
-	if format == "jpeg" {
+	if format == "png" {
+		// PNG streams row by row into the thumbnail, so its pixel count does
+		// not decide its memory; the estimate covers what is held.
+		est := probe.EstimateDecodeBytes(probe.KindImage, format, int64(cfg.Width)*int64(cfg.Height), cfg.Width, cfg.Height, opt.MaxEdge)
+		if opt.MaxDecodeBytes > 0 && est > opt.MaxDecodeBytes {
+			return out.skip("over_decode_budget", fmt.Sprintf(
+				"the decode estimate of %d bytes exceeds the %d byte budget; not attempted", est, opt.MaxDecodeBytes))
+		}
+		if dst, _, err = pngscale.Thumbnail(f, opt.MaxEdge); err != nil {
+			return out.skip("undecodable", "decode failed: "+err.Error())
+		}
+		out.Notes = append(out.Notes, "streamed")
+	} else if format == "jpeg" {
 		info, err := jpegscale.Inspect(f)
 		if err != nil {
 			return out.skip("undecodable_header", "header could not be decoded: "+err.Error())
@@ -261,7 +285,7 @@ func Generate(srcPath, dstPath string, expectSize, expectMtimeNS int64, opt Opti
 			return out.skip("over_pixel_budget", fmt.Sprintf(
 				"decoding it needs %d pixels, over the configured limit of %d; not attempted", decoded, opt.MaxPixels))
 		}
-		est := decoded*3 + info.CoefficientBytes + int64(opt.MaxEdge)*int64(opt.MaxEdge)*8 + 8<<20
+		est := decoded*3 + info.CoefficientBytes(scale) + int64(opt.MaxEdge)*int64(opt.MaxEdge)*8 + 8<<20
 		if opt.MaxDecodeBytes > 0 && est > opt.MaxDecodeBytes {
 			return out.skip("over_decode_budget", fmt.Sprintf(
 				"the decode estimate of %d bytes exceeds the %d byte budget; not attempted", est, opt.MaxDecodeBytes))
@@ -305,7 +329,9 @@ func Generate(srcPath, dstPath string, expectSize, expectMtimeNS int64, opt Opti
 		}
 	}
 
-	dst := orient(downscale(src, opt.MaxEdge), orientation)
+	if dst == nil {
+		dst = orient(downscale(src, opt.MaxEdge), orientation)
+	}
 	if dst == nil {
 		return out.fail("scale_failed", "downscale produced no image")
 	}

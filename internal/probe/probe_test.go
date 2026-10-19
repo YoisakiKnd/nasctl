@@ -714,7 +714,9 @@ func TestNormalizeExtTakesANameNotABareExtension(t *testing.T) {
 // later, so the property that matters is that it never dips below the decoded
 // planes it claims to account for.
 func TestEstimateDecodeBytesIsMonotonicAndPessimistic(t *testing.T) {
-	formats := []string{"jpeg", "png", "gif", "webp"}
+	// PNG is not here: it streams, so its cost follows row width and the
+	// thumbnail, not the pixel count (checked below).
+	formats := []string{"jpeg", "gif", "webp"}
 	pixels := []int64{1, 2, 100, 10_000, 1_000_000, 12_000_000}
 	for _, f := range formats {
 		var prev int64 = -1
@@ -734,6 +736,11 @@ func TestEstimateDecodeBytesIsMonotonicAndPessimistic(t *testing.T) {
 					f, p, est, min)
 			}
 		}
+	}
+	narrow := EstimateDecodeBytes(KindImage, "png", 1000*812, 1000, 812, 512)
+	wide := EstimateDecodeBytes(KindImage, "png", 8000*6500, 8000, 6500, 512)
+	if narrow <= 8<<20 || wide <= narrow || wide > 32<<20 {
+		t.Errorf("png estimates %d (1000x812) and %d (8000x6500): want above the runtime, growing with width, bounded", narrow, wide)
 	}
 	if est := EstimateDecodeBytes(KindImage, "jpeg", 1, 1, 1, 512); est <= 0 {
 		t.Errorf("EstimateDecodeBytes(1x1) = %d; a decode is never free", est)

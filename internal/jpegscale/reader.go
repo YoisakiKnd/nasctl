@@ -151,7 +151,7 @@ type decoder struct {
 	eobRun              uint16 // End-of-Band run, specified in section G.1.2.2.
 
 	comp       [maxComponents]component
-	progCoeffs [maxComponents][]block // Saved state between progressive-mode scans.
+	progCoeffs [maxComponents]*coeffs // Saved state between progressive-mode scans.
 	huff       [maxTc + 1][maxTh + 1]huffman
 	quant      [maxTq + 1]block // Quantization tables, in zig-zag order.
 	tmp        [2 * blockSize]byte
@@ -847,11 +847,13 @@ func DecodeConfig(r io.Reader) (image.Config, error) {
 type Info struct {
 	Width, Height int
 	Progressive   bool
-	// CoefficientBytes is what a progressive decode holds until its last
-	// scan: every DCT coefficient of every block. Zero for baseline images,
-	// which decode block by block.
-	CoefficientBytes int64
+	// Blocks counts the DCT blocks a progressive decode holds until its last
+	// scan; zero for baseline images, which decode block by block.
+	Blocks int64
 }
+
+// CoefficientBytes is what a progressive decode at scale holds between scans.
+func (i Info) CoefficientBytes(scale int) int64 { return i.Blocks * CoefficientBlockBytes(scale) }
 
 // Inspect reads the frame header only.
 func Inspect(r io.Reader) (Info, error) {
@@ -864,7 +866,7 @@ func Inspect(r io.Reader) (Info, error) {
 		mxx := int64((d.width + 8*d.maxH - 1) / (8 * d.maxH))
 		myy := int64((d.height + 8*d.maxV - 1) / (8 * d.maxV))
 		for i := 0; i < d.nComp; i++ {
-			info.CoefficientBytes += mxx * int64(d.comp[i].h) * myy * int64(d.comp[i].v) * blockSize * 4
+			info.Blocks += mxx * int64(d.comp[i].h) * myy * int64(d.comp[i].v)
 		}
 	}
 	return info, nil

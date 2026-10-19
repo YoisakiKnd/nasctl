@@ -1015,5 +1015,14 @@ func (s *Store) RequeueSkipped(ctx context.Context, collectionID int64, formats 
 		return probes, fmt.Errorf("store: requeue skipped thumbnails: %w", err)
 	}
 	thumbs, _ := res.RowsAffected()
-	return probes + thumbs, nil
+	// Thumbnails stopped at a memory ceiling are retried once per policy
+	// change, after any earlier attempts ran out.
+	res, err = s.db.ExecContext(ctx, `UPDATE media SET thumb_state = 'pending', thumb_attempts = 0, next_attempt_at = 0
+		 WHERE collection_id = ? AND probe_state = 'ok' AND thumb_state = 'failed' AND missing = 0
+		   AND thumb_reason IN ('worker_rss_over_max', 'worker_cgroup_over_max', 'cgroup_memory_max_events', 'cgroup_oom_kill')`, collectionID)
+	if err != nil {
+		return probes + thumbs, fmt.Errorf("store: requeue thumbnails stopped by memory: %w", err)
+	}
+	stopped, _ := res.RowsAffected()
+	return probes + thumbs + stopped, nil
 }
